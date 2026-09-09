@@ -6,6 +6,32 @@ const applicationLabels = {
   officer: "Officer Application",
 };
 
+const fieldLabels = {
+  characterName: "Character Name",
+  className: "Main Class",
+  spec: "Specialization",
+  specialization: "Specialization",
+  offSpec: "Off-Specialization",
+  offSpecialization: "Off-Specialization",
+  altClass: "Alt Class",
+  availability: "Raid Availability",
+  introduction: "Introduction",
+  account: "Account",
+  armoryLink: "Armory Link",
+  warcraftLogsLink: "Warcraft Logs Link",
+  notes: "Verification Notes",
+  rank: "Preferred Rank",
+  experience: "Leadership Experience",
+  goals: "Goals for the Guild",
+};
+
+const linkLabels = {
+  armoryLink: "Armory Link",
+  warcraftLogsLink: "Warcraft Logs Link",
+};
+
+const privateVerificationFields = new Set(["account", "discordAccount", "discordTag", "discordUsername"]);
+
 function getWebhookUrl(applicationType) {
   const webhookUrls = {
     verification: process.env.DISCORD_CHARACTER_CHECK_WEBHOOK_URL,
@@ -27,13 +53,28 @@ function cleanValue(value) {
   return String(value || "").trim().slice(0, 1000);
 }
 
+function getFieldLabel(name) {
+  return fieldLabels[name] || name.replace(/([A-Z])/g, " $1").replace(/^./, (character) => character.toUpperCase());
+}
+
+function formatFieldValue(name, value) {
+  const cleanedValue = cleanValue(value);
+  if (!cleanedValue) return "Not provided";
+
+  const linkLabel = linkLabels[name];
+  return linkLabel && /^https?:\/\//i.test(cleanedValue)
+    ? `[${linkLabel}](${cleanedValue})`
+    : cleanedValue;
+}
+
 async function submitApplication(applicationType, fields) {
   const webhookUrl = getWebhookUrl(applicationType);
   const label = applicationLabels[applicationType];
   const submittedFields = Object.entries(fields)
+    .filter(([name]) => !(applicationType === "verification" && privateVerificationFields.has(name)))
     .map(([name, value]) => ({
-      name: cleanValue(name),
-      value: cleanValue(value) || "Not provided",
+      name: getFieldLabel(name),
+      value: formatFieldValue(name, value),
       inline: false,
     }))
     .filter((field) => field.name);
