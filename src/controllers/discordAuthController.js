@@ -43,8 +43,15 @@ discordAuthRouter.get("/auth/discord/callback", async (req, res) => {
     const user = await exchangeCodeForUser(code);
     return res.redirect(`${getWebOrigin()}/#discord_user=${encodeUser(user)}`);
   } catch (authError) {
-    console.error("Discord OAuth callback failed:", authError.response?.status || authError.message);
-    return res.redirect(`${getWebOrigin()}/#discord_error=login_failed`);
+    const discordError = authError.response?.data?.error || "exchange_failed";
+    const status = authError.response?.status || "unknown_status";
+    const description = authError.response?.data?.error_description || authError.message;
+    console.error("Discord OAuth callback failed:", status, discordError, description);
+    const params = new URLSearchParams({
+      discord_error: "login_failed",
+      discord_error_description: `${discordError} (${status})`,
+    });
+    return res.redirect(`${getWebOrigin()}/#${params.toString()}`);
   }
 });
 
