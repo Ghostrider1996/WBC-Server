@@ -26,7 +26,20 @@ async function getServerEvents() {
     },
   });
 
-  return response.data;
+  const events = response.data.postedEvents ?? [];
+  const detailedEvents = await Promise.all(
+    events.map(async (event) => {
+      try {
+        const detailResponse = await raidHelperClient.get(`/events/${event.id}`);
+        return detailResponse.data?.event ?? detailResponse.data;
+      } catch (error) {
+        console.error(`Raid Helper event details request failed for ${event.id}:`, error.message);
+        return event;
+      }
+    }),
+  );
+
+  return { ...response.data, postedEvents: detailedEvents };
 }
 
 module.exports = { getServerEvents };
