@@ -31,7 +31,13 @@ async function getServerEvents() {
     events.map(async (event) => {
       try {
         const detailResponse = await raidHelperClient.get(`/events/${event.id}`);
-        return detailResponse.data?.event ?? detailResponse.data;
+        const detail = detailResponse.data?.event
+          ?? detailResponse.data?.data
+          ?? detailResponse.data;
+
+        return detail && typeof detail === "object"
+          ? { ...event, ...detail }
+          : event;
       } catch (error) {
         console.error(`Raid Helper event details request failed for ${event.id}:`, error.message);
         return event;
