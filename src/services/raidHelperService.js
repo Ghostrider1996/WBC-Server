@@ -35,9 +35,13 @@ async function getServerEvents() {
           ?? detailResponse.data?.data
           ?? detailResponse.data;
 
-        return detail && typeof detail === "object"
-          ? { ...event, ...detail }
-          : event;
+        if (!detail || typeof detail !== "object") return event;
+
+        const nonEmptyDetail = Object.fromEntries(
+          Object.entries(detail).filter(([, value]) => value !== null && value !== undefined && value !== ""),
+        );
+
+        return { ...event, ...nonEmptyDetail };
       } catch (error) {
         console.error(`Raid Helper event details request failed for ${event.id}:`, error.message);
         return event;
