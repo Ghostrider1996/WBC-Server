@@ -29,10 +29,14 @@ discordAuthRouter.get("/auth/discord", (req, res) => {
 });
 
 discordAuthRouter.get("/auth/discord/callback", async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, error_description: errorDescription } = req.query;
 
   if (error || !code) {
-    return res.redirect(`${getWebOrigin()}/#discord_error=authorization_failed`);
+    const params = new URLSearchParams({
+      discord_error: error || "authorization_failed",
+      ...(errorDescription ? { discord_error_description: errorDescription } : {}),
+    });
+    return res.redirect(`${getWebOrigin()}/#${params.toString()}`);
   }
 
   try {
