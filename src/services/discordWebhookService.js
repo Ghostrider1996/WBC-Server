@@ -1,33 +1,33 @@
 const axios = require("axios");
 
 const applicationLabels = {
-  verification: "Character Check",
+  verification: "Verification Form",
   guild: "Guild Application",
   officer: "Officer Application",
 };
 
 const fieldLabels = {
   characterName: "Character Name",
-  className: "Main Class",
-  spec: "Specialization",
-  specialization: "Specialization",
-  offSpec: "Off-Specialization",
-  offSpecialization: "Off-Specialization",
+  className: "Character Class",
+  spec: "Main Specialization",
+  specialization: "Main Specialization",
+  offSpec: "Off Specialization",
+  offSpecialization: "Off Specialization",
   altClass: "Alt Class",
   availability: "Raid Availability",
   introduction: "Introduction",
   account: "Account",
-  armoryLink: "Armory Link",
-  warcraftLogsLink: "Warcraft Logs Link",
-  notes: "Verification Notes",
+  armoryLink: "Classic Armory",
+  warcraftLogsLink: "WarcraftLogs",
   rank: "Preferred Rank",
   experience: "Leadership Experience",
   goals: "Goals for the Guild",
+  notes: "Verification Notes",
 };
 
 const linkLabels = {
-  armoryLink: "Armory Link",
-  warcraftLogsLink: "Warcraft Logs Link",
+  armoryLink: ":link: My Armory",
+  warcraftLogsLink: ":link: My Logs",
 };
 
 const privateVerificationFields = new Set(["account", "discordAccount", "discordTag", "discordUsername"]);
@@ -70,22 +70,41 @@ function formatFieldValue(name, value) {
 async function submitApplication(applicationType, fields) {
   const webhookUrl = getWebhookUrl(applicationType);
   const label = applicationLabels[applicationType];
-  const submittedFields = Object.entries(fields)
+
+  // Extract notes so it can be appended last
+  const { notes, verificationNotes, ...otherFields } = fields;
+  const notesContent = notes || verificationNotes;
+
+  const entries = Object.entries(otherFields);
+  if (notesContent) {
+    entries.push(["notes", notesContent]);
+  }
+
+  const submittedFields = entries
     .filter(([name]) => !(applicationType === "verification" && privateVerificationFields.has(name)))
     .map(([name, value]) => ({
       name: getFieldLabel(name),
       value: formatFieldValue(name, value),
       inline: false,
     }))
-    .filter((field) => field.name);
+    .filter((field) => field.name && field.value);
+
+  const LOGO_URL = "https://i.postimg.cc/2y7YQNLt/WBC-Logo.png";
+  const VERIFICATION_BANNER = "https://i.postimg.cc/PfQnFhPs/file-000000007bf882468e45a7f7dd58c06d.png";
+  const DEFAULT_BANNER = "https://i.postimg.cc/PfQnFhPs/file-000000007bf882468e45a7f7dd58c06d.png";
+
+  console.log(applicationType);
+  
 
   try {
     await axios.post(webhookUrl, {
       embeds: [{
         title: label,
-        color: 13882323,
+        color: 255,
         fields: submittedFields,
         footer: { text: "Submitted from WBC Web Client" },
+        thumbnail: { url: LOGO_URL },
+        image: { url: applicationType === "verification" ? DEFAULT_BANNER : DEFAULT_BANNER },
         timestamp: new Date().toISOString(),
       }],
     });
