@@ -7,7 +7,7 @@ const discordClient = axios.create({
   },
 });
 
-function getDiscordAuthorizationUrl() {
+function getDiscordAuthorizationUrl(state = "/") {
   const clientId = process.env.DISCORD_CLIENT_ID;
   const redirectUri = process.env.DISCORD_REDIRECT_URI;
 
@@ -20,6 +20,7 @@ function getDiscordAuthorizationUrl() {
     redirect_uri: redirectUri,
     response_type: "code",
     scope: "identify",
+    state,
   });
 
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
@@ -56,7 +57,14 @@ async function exchangeCodeForUser(code) {
     },
   });
 
-  return userResponse.data;
+  return {
+    profile: userResponse.data,
+    tokens: {
+      access_token: tokenResponse.data.access_token,
+      refresh_token: tokenResponse.data.refresh_token,
+      expires_in: tokenResponse.data.expires_in,
+    },
+  };
 }
 
 module.exports = { exchangeCodeForUser, getDiscordAuthorizationUrl };
