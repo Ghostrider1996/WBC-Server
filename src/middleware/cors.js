@@ -9,6 +9,8 @@ function cors() {
     "http://localhost:5174",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
+    "https://wbchq.com",
+    "https://www.wbchq.com",
     "https://ghostrider1996.github.io",
     ...configuredOrigins,
   ];
@@ -18,7 +20,8 @@ function cors() {
 
     if (allowedOrigins.includes(origin)) return true;
 
-    return /^https:\/\/([a-z0-9-]+\.)*github\.io$/i.test(origin)
+    return /^https:\/\/(www\.)?wbchq\.com$/i.test(origin)
+      || /^https:\/\/([a-z0-9-]+\.)*github\.io$/i.test(origin)
       || /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin)
       || /^https:\/\/([a-z0-9-]+\.)*render\.com$/i.test(origin)
       || /^http:\/\/localhost:\d+$/i.test(origin);
@@ -27,14 +30,15 @@ function cors() {
   return function (req, res, next) {
     const origin = req.headers.origin;
 
+    res.setHeader("Vary", "Origin");
+
     if (origin && isAllowedOrigin(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
     }
 
     res.setHeader("Access-Control-Allow-Methods", "OPTIONS, GET, POST, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, X-Requested-With");
 
     if (req.method === "OPTIONS") {
       res.status(204).end();
@@ -44,5 +48,7 @@ function cors() {
     next();
   };
 }
+
+module.exports = cors;
 
 module.exports = { cors };
