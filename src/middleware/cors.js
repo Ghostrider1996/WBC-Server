@@ -24,6 +24,7 @@ function cors() {
       || /^https:\/\/([a-z0-9-]+\.)*github\.io$/i.test(origin)
       || /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin)
       || /^https:\/\/([a-z0-9-]+\.)*render\.com$/i.test(origin)
+      || /^https:\/\/([a-z0-9-]+\.)*onrender\.com$/i.test(origin)
       || /^http:\/\/localhost:\d+$/i.test(origin);
   };
 

@@ -7,17 +7,17 @@ const discordClient = axios.create({
   },
 });
 
-function getDiscordAuthorizationUrl(state = "/") {
+function getDiscordAuthorizationUrl(state = "/", redirectUri) {
   const clientId = process.env.DISCORD_CLIENT_ID;
-  const redirectUri = process.env.DISCORD_REDIRECT_URI;
+  const resolvedRedirectUri = redirectUri || process.env.DISCORD_REDIRECT_URI;
 
-  if (!clientId || !redirectUri) {
+  if (!clientId || !resolvedRedirectUri) {
     throw new Error("Discord OAuth configuration is missing");
   }
 
   const params = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: redirectUri,
+    redirect_uri: resolvedRedirectUri,
     response_type: "code",
     scope: "identify",
     state,
@@ -26,12 +26,12 @@ function getDiscordAuthorizationUrl(state = "/") {
   return `https://discord.com/oauth2/authorize?${params.toString()}`;
 }
 
-async function exchangeCodeForUser(code) {
+async function exchangeCodeForUser(code, redirectUri) {
   const clientId = process.env.DISCORD_CLIENT_ID;
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-  const redirectUri = process.env.DISCORD_REDIRECT_URI;
+  const resolvedRedirectUri = redirectUri || process.env.DISCORD_REDIRECT_URI;
 
-  if (!clientId || !clientSecret || !redirectUri) {
+  if (!clientId || !clientSecret || !resolvedRedirectUri) {
     throw new Error("Discord OAuth configuration is missing");
   }
 
@@ -42,7 +42,7 @@ async function exchangeCodeForUser(code) {
       client_secret: clientSecret,
       grant_type: "authorization_code",
       code,
-      redirect_uri: redirectUri,
+      redirect_uri: resolvedRedirectUri,
     }),
     {
       headers: {
