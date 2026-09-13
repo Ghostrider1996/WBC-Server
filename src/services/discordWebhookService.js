@@ -115,4 +115,56 @@ async function submitApplication(applicationType, fields) {
   }
 }
 
-module.exports = { submitApplication };
+const MAGTHERIDON_DIAGRAM_URL = "https://wbchq-assets.s3.us-east-1.amazonaws.com/discord/magtheridon_diagram.png";
+
+function cleanSectionValue(value) {
+  const text = String(value || "").trim();
+  return text.slice(0, 1024) || "None set";
+}
+
+async function pushRaidAssignments({ title, sections, includeImage, eventId }) {
+  const webhookUrl = process.env.DISCORD_ASSIGNMENTS_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    const error = new Error("Discord assignments webhook is not configured");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const fields = (Array.isArray(sections) ? sections : [])
+    .slice(0, 25)
+    .map((section) => ({
+      name: String(section?.name || "Assignment").trim().slice(0, 256) || "Assignment",
+      value: cleanSectionValue(section?.value),
+      inline: false,
+    }))
+    .filter((field) => field.name);
+
+  if (fields.length === 0) {
+    const error = new Error("No assignment sections were provided");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const embed = {
+    title: String(title || "Raid assignments").trim().slice(0, 256) || "Raid assignments",
+    color: 9127188,
+    fields,
+    timestamp: new Date().toISOString(),
+    footer: { text: eventId ? `Event ${String(eventId).slice(0, 80)}` : "WBC Raid Assignments" },
+  };
+
+  if (includeImage !== false) {
+    embed.image = { url: MAGTHERIDON_DIAGRAM_URL };
+  }
+
+  try {
+    await axios.post(webhookUrl, { embeds: [embed] });
+  } catch (error) {
+    const webhookError = new Error("Assignments webhook rejected the request");
+    webhookError.statusCode = error.response?.status || 502;
+    throw webhookError;
+  }
+}
+
+module.exports = { submitApplication, pushRaidAssignments };
