@@ -2,19 +2,20 @@ const fs = require("fs");
 const path = require("path");
 const dotenv = require("dotenv");
 const { Client } = require("pg");
+const { getSslConfig, normalizeDatabaseUrl } = require("./connection");
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 function getMigrationUrl() {
   if (process.env.DATABASE_URL_DIRECT) {
-    return process.env.DATABASE_URL_DIRECT;
+    return normalizeDatabaseUrl(process.env.DATABASE_URL_DIRECT);
   }
 
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is missing");
   }
 
-  return process.env.DATABASE_URL.replace("-pooler", "");
+  return normalizeDatabaseUrl(process.env.DATABASE_URL.replace("-pooler", ""));
 }
 
 async function migrate() {
@@ -22,7 +23,7 @@ async function migrate() {
   const schemaSql = fs.readFileSync(schemaPath, "utf8");
   const client = new Client({
     connectionString: getMigrationUrl(),
-    ssl: { rejectUnauthorized: true },
+    ssl: getSslConfig(),
   });
 
   await client.connect();

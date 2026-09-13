@@ -126,3 +126,17 @@ DROP TRIGGER IF EXISTS gallery_posts_set_updated_at ON gallery_posts;
 CREATE TRIGGER gallery_posts_set_updated_at
   BEFORE UPDATE ON gallery_posts
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS battlenet_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS battlenet_battletag TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS battlenet_access_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS battlenet_refresh_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS battlenet_token_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS battlenet_connected_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS warcraftlogs_enabled BOOLEAN NOT NULL DEFAULT true;
+
+ALTER TABLE characters ADD COLUMN IF NOT EXISTS level INTEGER;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_battlenet_id_idx
+  ON users (battlenet_id)
+  WHERE battlenet_id IS NOT NULL;

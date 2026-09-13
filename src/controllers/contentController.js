@@ -5,21 +5,16 @@ const {
   listGalleryPosts,
   createGalleryPost,
 } = require("../services/contentService");
+const { isAdmin } = require("../services/adminService");
 
 const contentRouter = Router();
 
-function isAdmin(username) {
-  const adminUsername = process.env.ADMIN_USERNAME;
-
-  if (!adminUsername || !username || typeof username !== "string") {
-    return false;
-  }
-
-  return username.trim().toLowerCase() === adminUsername.trim().toLowerCase();
-}
-
 function requireAdmin(req, res) {
-  if (isAdmin(req.body?.username)) {
+  if (isAdmin({
+    username: req.body?.username,
+    globalName: req.body?.globalName,
+    discordId: req.body?.discordId,
+  })) {
     return true;
   }
 

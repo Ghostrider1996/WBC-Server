@@ -45,4 +45,131 @@ async function upsertDiscordUser(profile, tokens = {}) {
   return result.rows[0];
 }
 
-module.exports = { upsertDiscordUser };
+async function findUserByDiscordId(discordId) {
+  const result = await query(
+    `
+      SELECT
+        id,
+        discord_id,
+        username,
+        battlenet_id,
+        battlenet_battletag,
+        battlenet_access_token,
+        battlenet_refresh_token,
+        battlenet_token_expires_at,
+        battlenet_connected_at,
+        COALESCE(warcraftlogs_enabled, true) AS warcraftlogs_enabled
+      FROM users
+      WHERE discord_id = $1
+    `,
+    [String(discordId)],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function ensureUserFromDiscord({ discordId, username, globalName }) {
+  const existing = await findUserByDiscordId(discordId);
+
+  if (existing) {
+    return existing;
+  }
+
+  const result = await query(
+    `
+      INSERT INTO users (discord_id, username, global_name)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (discord_id) DO UPDATE SET
+        username = EXCLUDED.username,
+        global_name = COALESCE(EXCLUDED.global_name, users.global_name)
+      RETURNING
+        id,
+        discord_id,
+        username,
+        battlenet_id,
+        battlenet_battletag,
+        battlenet_access_token,
+        battlenet_refresh_token,
+        battlenet_token_expires_at,
+        battlenet_connected_at,
+        COALESCE(warcraftlogs_enabled, true) AS warcraftlogs_enabled
+    `,
+    [String(discordId), username || "unknown", globalName || username || "unknown"],
+  );
+
+  return result.rows[0];
+}
+
+async function saveBattleNetAccount(userId, profile, tokens = {}) {
+  const expiresAt = tokens.expires_in
+    ? new Date(Date.now() + Number(tokens.expires_in) * 1000)
+    : null;
+
+  const result = await query(
+    `
+      UPDATE users SET
+        battlenet_id = $2,
+        battlenet_battletag = $3,
+        battlenet_access_token = $4,
+        battlenet_refresh_token = COALESCE($5, battlenet_refresh_token),
+        battlenet_token_expires_at = $6,
+        battlenet_connected_at = now()
+      WHERE id = $1
+      RETURNING
+        id,
+        discord_id,
+        battlenet_id,
+        battlenet_battletag,
+        battlenet_connected_at
+    `,
+    [
+      userId,
+      profile.id,
+      profile.battletag,
+      tokens.access_token || null,
+      tokens.refresh_token || null,
+      expiresAt,
+    ],
+  );
+
+  return result.rows[0];
+}
+
+async function disconnectBattleNet(userId) {
+  await query(
+    `
+      UPDATE users SET
+        battlenet_id = NULL,
+        battlenet_battletag = NULL,
+        battlenet_access_token = NULL,
+        battlenet_refresh_token = NULL,
+        battlenet_token_expires_at = NULL,
+        battlenet_connected_at = NULL
+      WHERE id = $1
+    `,
+    [userId],
+  );
+}
+
+async function setWarcraftLogsEnabled(userId, enabled) {
+  const result = await query(
+    `
+      UPDATE users
+      SET warcraftlogs_enabled = $2
+      WHERE id = $1
+      RETURNING COALESCE(warcraftlogs_enabled, true) AS warcraftlogs_enabled
+    `,
+    [userId, Boolean(enabled)],
+  );
+
+  return result.rows[0]?.warcraftlogs_enabled !== false;
+}
+
+module.exports = {
+  upsertDiscordUser,
+  findUserByDiscordId,
+  ensureUserFromDiscord,
+  saveBattleNetAccount,
+  disconnectBattleNet,
+  setWarcraftLogsEnabled,
+};
