@@ -31,6 +31,11 @@ async function listCharactersForUser(userId) {
   return result.rows.map(mapCharacter);
 }
 
+async function getCharacterForUser(userId, characterId) {
+  const characters = await listCharactersForUser(userId);
+  return characters.find((character) => String(character.id) === String(characterId)) || null;
+}
+
 async function replaceCharactersForUser(userId, characters) {
   const mainIndex = characters.reduce((best, character, index) => {
     const current = characters[best] || { level: 0, itemLevel: 0 };
@@ -100,4 +105,10 @@ async function updateCharacterWarcraftLogsUrl(characterId, url) {
   );
 }
 
-module.exports = { listCharactersForUser, replaceCharactersForUser, updateCharacterWarcraftLogsUrl, deleteCharactersForUser };
+module.exports = {
+  listCharactersForUser,
+  getCharacterForUser,
+  replaceCharactersForUser,
+  updateCharacterWarcraftLogsUrl,
+  deleteCharactersForUser,
+};

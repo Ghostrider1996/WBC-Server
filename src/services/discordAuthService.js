@@ -19,7 +19,7 @@ function getDiscordAuthorizationUrl(state = "/", redirectUri) {
     client_id: clientId,
     redirect_uri: resolvedRedirectUri,
     response_type: "code",
-    scope: "identify",
+    scope: "identify guilds.members.read",
     state,
   });
 
