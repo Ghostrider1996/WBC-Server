@@ -13,6 +13,13 @@ const TANK_SPECS = {
   druid: "Guardian",
 };
 
+const TBC_ANNIVERSARY_TEMPLATE = "wowtbc";
+
+function cleanEnvValue(value) {
+  if (!value || typeof value !== "string") return "";
+  return value.split("#")[0].trim();
+}
+
 function getRaidHelperConfig() {
   const serverId = process.env.RAID_HELPER_SERVER_ID;
   const apiKey = process.env.RAID_HELPER_API_KEY;
@@ -273,4 +280,147 @@ async function deleteEvent(eventId) {
   }
 }
 
-module.exports = { getServerEvents, signUpForEvent, deleteEvent };
+function envChannel(name) {
+  return cleanEnvValue(process.env[name]);
+}
+
+function isKarazhanEvent(raid, title) {
+  const text = `${raid || ""} ${title || ""}`.toLowerCase();
+  return /\bkara(?:zhan)?\b/.test(text);
+}
+
+function getCalendarWeekday(value) {
+  if (typeof value === "string") {
+    const isoMatch = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3])).getDay();
+    }
+    const dmyMatch = value.trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (dmyMatch) {
+      return new Date(Number(dmyMatch[3]), Number(dmyMatch[2]) - 1, Number(dmyMatch[1])).getDay();
+    }
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? -1 : date.getDay();
+}
+
+function requireChannel(channelId, envName, label) {
+  if (channelId) return channelId;
+  const error = new Error(`Set ${envName} in the API .env for ${label}.`);
+  error.statusCode = 400;
+  throw error;
+}
+
+function resolveChannelId({ raid, title, date } = {}) {
+  if (isKarazhanEvent(raid, title)) {
+    return requireChannel(
+      envChannel("RAID_HELPER_KARA_CHANNEL_ID"),
+      "RAID_HELPER_KARA_CHANNEL_ID",
+      "Karazhan events",
+    );
+  }
+
+  const weekday = getCalendarWeekday(date);
+  if (weekday === 6) {
+    return requireChannel(
+      envChannel("RAID_HELPER_SATURDAY_CHANNEL_ID"),
+      "RAID_HELPER_SATURDAY_CHANNEL_ID",
+      "Saturday raids",
+    );
+  }
+
+  if (weekday === 0) {
+    return requireChannel(
+      envChannel("RAID_HELPER_SUNDAY_CHANNEL_ID") || envChannel("RAID_HELPER_CHANNEL_ID"),
+      "RAID_HELPER_SUNDAY_CHANNEL_ID",
+      "Sunday raids",
+    );
+  }
+
+  const error = new Error("Karazhan can be posted any day. Other raids must be scheduled on Saturday or Sunday.");
+  error.statusCode = 400;
+  throw error;
+}
+
+function toRaidHelperDate(value) {
+  if (typeof value === "string") {
+    const isoMatch = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[3]}-${isoMatch[2]}-${isoMatch[1]}`;
+    const dmyMatch = value.trim().match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (dmyMatch) {
+      return `${dmyMatch[1].padStart(2, "0")}-${dmyMatch[2].padStart(2, "0")}-${dmyMatch[3]}`;
+    }
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}-${month}-${date.getFullYear()}`;
+}
+
+function toRaidHelperTime(value) {
+  if (typeof value === "string") {
+    const match = value.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (match) return `${String(match[1]).padStart(2, "0")}:${match[2]}`;
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+async function createEvent({
+  title,
+  description,
+  date,
+  time,
+  raid,
+  leaderId,
+  duration,
+  limit,
+  image,
+}) {
+  const eventTitle = String(title || "").trim();
+  const eventDate = toRaidHelperDate(date);
+  const eventTime = toRaidHelperTime(time);
+  const eventLeaderId = String(leaderId || "").trim();
+
+  if (!eventTitle || !eventDate || !eventTime || !eventLeaderId) {
+    const error = new Error("Title, date, time, and a Discord account are required.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const { serverId } = getRaidHelperConfig();
+  const resolvedChannelId = resolveChannelId({ raid, title: eventTitle, date });
+
+  const advancedSettings = compactPayload({
+    duration: Number(duration) > 0 ? Number(duration) : undefined,
+    limit: Number(limit) > 0 ? Number(limit) : undefined,
+    image: String(image || "").trim() || undefined,
+    description: String(description || "").trim() || undefined,
+  });
+
+  try {
+    const response = await raidHelperClient.post(
+      `/servers/${serverId}/channels/${resolvedChannelId}/event`,
+      compactPayload({
+        leaderId: eventLeaderId,
+        templateId: TBC_ANNIVERSARY_TEMPLATE,
+        date: eventDate,
+        time: eventTime,
+        title: eventTitle,
+        description: String(description || "").trim() || undefined,
+        advancedSettings: Object.keys(advancedSettings).length ? advancedSettings : undefined,
+      }),
+      { headers: authHeaders() },
+    );
+    return eventFromResponse(response.data);
+  } catch (error) {
+    throw wrapRaidHelperError(error, "The raid event could not be created.");
+  }
+}
+
+module.exports = { getServerEvents, signUpForEvent, deleteEvent, createEvent };

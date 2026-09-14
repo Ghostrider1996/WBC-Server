@@ -143,24 +143,48 @@ function blizzardHeaders(accessToken) {
   };
 }
 
+const { roleFromSpec } = require("./wowSpecs");
+
 function classNameFrom(character) {
   return character.playable_class?.name
     || CLASS_NAMES[character.playable_class?.id]
     || "Unknown";
 }
 
-function roleFromSpec(spec) {
-  const value = String(spec || "").toLowerCase();
+function specFromSpecializations(data) {
+  if (!data || typeof data !== "object") return "";
 
-  if (["protection", "guardian"].includes(value)) {
-    return "Tank";
+  const named = data.active_specialization?.name || data.active_spec?.name || "";
+  const trees = [
+    ...(data.specializations || []),
+    ...(data.specialization_groups || []).flatMap((group) => group.specializations || []),
+  ];
+
+  let best = { name: named, points: named ? 0 : -1 };
+
+  for (const tree of trees) {
+    const name = tree.specialization_name || tree.talent_tree?.name || tree.name || "";
+    const points = Number(tree.spent_points ?? tree.points ?? 0);
+    if (name && points > best.points) best = { name, points };
   }
 
-  if (["holy", "discipline", "restoration"].includes(value)) {
-    return "Healer";
-  }
+  return best.name || "";
+}
 
-  return "DPS";
+async function fetchTalentSpec(accessToken, realm, name) {
+  const slug = String(realm || "").toLowerCase();
+  const characterName = encodeURIComponent(String(name || "").toLowerCase());
+  const params = { namespace: getNamespace(), locale: getLocale() };
+
+  try {
+    const response = await axios.get(
+      `${apiBase()}/profile/wow/character/${slug}/${characterName}/specializations`,
+      { headers: blizzardHeaders(accessToken), params },
+    );
+    return specFromSpecializations(response.data);
+  } catch {
+    return "";
+  }
 }
 
 function armoryUrl(realm, name) {
@@ -186,7 +210,8 @@ async function fetchCharacterDetails(accessToken, realm, name) {
       { headers: blizzardHeaders(accessToken), params },
     );
 
-    const spec = response.data.active_spec?.name || "";
+    const talentSpec = await fetchTalentSpec(accessToken, realm, name);
+    const spec = talentSpec || response.data.active_spec?.name || "";
     return {
       spec,
       role: roleFromSpec(spec),

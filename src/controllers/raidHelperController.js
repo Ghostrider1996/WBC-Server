@@ -1,8 +1,9 @@
 const { Router } = require("express");
-const { getServerEvents, signUpForEvent, deleteEvent } = require("../services/raidHelperService");
+const { getServerEvents, signUpForEvent, deleteEvent, createEvent } = require("../services/raidHelperService");
 const { findUserByDiscordId } = require("../services/userService");
 const { getCharacterForUser } = require("../services/characterService");
 const { canManageRaidEvents } = require("../services/discordGuildService");
+const { resolveSpecForClass, roleFromSpec } = require("../services/wowSpecs");
 
 const raidHelperRouter = Router();
 
@@ -66,6 +67,12 @@ raidHelperRouter.post("/raid-helper/events/:eventId/signups", async (req, res) =
       if (!character) {
         return res.status(400).json({ reason: "That character was not found on this Battle.net account.", status: "failed" });
       }
+      const spec = resolveSpecForClass(character.class, req.body?.spec) || character.spec;
+      character = {
+        ...character,
+        spec,
+        role: roleFromSpec(spec) || character.role,
+      };
     }
 
     await signUpForEvent({
@@ -92,9 +99,46 @@ raidHelperRouter.get("/raid-helper/permissions", async (req, res) => {
       username: req.query.username || user?.username,
       globalName: req.query.globalName || user?.global_name,
     });
-    return res.status(200).json({ canDeleteEvents });
+    return res.status(200).json({
+      canDeleteEvents,
+      canCreateEvents: canDeleteEvents,
+    });
   } catch (error) {
     return handleRaidHelperError(res, error, "Raid permissions could not be loaded.");
+  }
+});
+
+raidHelperRouter.post("/raid-helper/events", async (req, res) => {
+  const discordId = readDiscordId(req, res);
+  if (!discordId) return;
+
+  try {
+    const user = await findUserByDiscordId(discordId);
+    const allowed = await canManageRaidEvents({
+      discordId,
+      username: req.body?.username || user?.username,
+      globalName: req.body?.globalName || user?.global_name,
+    });
+
+    if (!allowed) {
+      return res.status(403).json({ reason: "Only Discord GMs can create raid events.", status: "failed" });
+    }
+
+    const event = await createEvent({
+      title: req.body?.title,
+      description: req.body?.description,
+      date: req.body?.date,
+      time: req.body?.time,
+      raid: req.body?.raid,
+      leaderId: discordId,
+      duration: req.body?.duration,
+      limit: req.body?.limit,
+      image: req.body?.image,
+    });
+
+    return res.status(201).json({ status: "created", event });
+  } catch (error) {
+    return handleRaidHelperError(res, error, "The raid event could not be created.");
   }
 });
 
