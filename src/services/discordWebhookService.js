@@ -67,12 +67,67 @@ function formatFieldValue(name, value) {
     : cleanedValue;
 }
 
-async function submitApplication(applicationType, fields) {
+function sanitizeApplicant(applicant) {
+  if (!applicant || typeof applicant !== "object" || Array.isArray(applicant)) {
+    return null;
+  }
+
+  const discordId = String(applicant.discordId || applicant.id || "").replace(/\D/g, "").slice(0, 32);
+  const username = cleanValue(applicant.username).slice(0, 32);
+  const globalName = cleanValue(applicant.globalName || applicant.global_name || username).slice(0, 80);
+  const avatar = cleanValue(applicant.avatar).replace(/[^a-zA-Z0-9_]/g, "").slice(0, 64);
+
+  if (!discordId && !username) return null;
+
+  return { discordId, username, globalName, avatar };
+}
+
+function formatApplicantField(applicant) {
+  const parts = [];
+
+  if (applicant.discordId) parts.push(`<@${applicant.discordId}>`);
+  if (applicant.username) parts.push(`@${applicant.username}`);
+  if (applicant.globalName && applicant.globalName.toLowerCase() !== applicant.username.toLowerCase()) {
+    parts.push(applicant.globalName);
+  }
+
+  return parts.join(" · ") || "Unknown";
+}
+
+function getApplicantAuthor(applicant) {
+  if (!applicant) return undefined;
+
+  const handle = applicant.username ? `@${applicant.username}` : "";
+  const name = [applicant.globalName || handle, handle && applicant.globalName ? handle : ""]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 256) || "Discord member";
+
+  const author = { name };
+
+  if (applicant.discordId && applicant.avatar) {
+    author.icon_url = `https://cdn.discordapp.com/avatars/${applicant.discordId}/${applicant.avatar}.png?size=64`;
+  }
+
+  return author;
+}
+
+async function submitApplication(applicationType, fields, applicantPayload) {
   const webhookUrl = getWebhookUrl(applicationType);
   const label = applicationLabels[applicationType];
+  const applicant = sanitizeApplicant(applicantPayload);
 
   // Extract notes so it can be appended last
-  const { notes, verificationNotes, ...otherFields } = fields;
+  const {
+    notes,
+    verificationNotes,
+    discordId,
+    discordUsername,
+    discordDisplayName,
+    discordTag,
+    discordAccount,
+    ...otherFields
+  } = fields;
   const notesContent = notes || verificationNotes;
 
   const entries = Object.entries(otherFields);
@@ -89,22 +144,27 @@ async function submitApplication(applicationType, fields) {
     }))
     .filter((field) => field.name && field.value);
 
-  const LOGO_URL = "https://i.postimg.cc/2y7YQNLt/WBC-Logo.png";
-  const VERIFICATION_BANNER = "https://i.postimg.cc/PfQnFhPs/file-000000007bf882468e45a7f7dd58c06d.png";
-  const DEFAULT_BANNER = "https://i.postimg.cc/PfQnFhPs/file-000000007bf882468e45a7f7dd58c06d.png";
+  if (applicant) {
+    submittedFields.unshift({
+      name: "Discord",
+      value: formatApplicantField(applicant),
+      inline: false,
+    });
+  }
 
-  console.log(applicationType);
-  
+  const LOGO_URL = "https://i.postimg.cc/2y7YQNLt/WBC-Logo.png";
+  const DEFAULT_BANNER = "https://i.postimg.cc/PfQnFhPs/file-000000007bf882468e45a7f7dd58c06d.png";
 
   try {
     await axios.post(webhookUrl, {
       embeds: [{
         title: label,
         color: 255,
+        author: getApplicantAuthor(applicant),
         fields: submittedFields,
         footer: { text: "Submitted from WBC Web Client" },
         thumbnail: { url: LOGO_URL },
-        image: { url: applicationType === "verification" ? DEFAULT_BANNER : DEFAULT_BANNER },
+        image: { url: DEFAULT_BANNER },
         timestamp: new Date().toISOString(),
       }],
     });

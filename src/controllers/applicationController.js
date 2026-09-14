@@ -5,14 +5,14 @@ const applicationRouter = Router();
 const allowedTypes = new Set(["verification", "guild", "officer"]);
 
 applicationRouter.post("/applications", async (req, res) => {
-  const { type, fields } = req.body;
+  const { type, fields, applicant } = req.body;
 
   if (!allowedTypes.has(type) || !fields || typeof fields !== "object" || Array.isArray(fields)) {
     return res.status(400).json({ reason: "Invalid application payload", status: "failed" });
   }
 
   try {
-    await submitApplication(type, fields);
+    await submitApplication(type, fields, applicant);
     return res.status(201).json({ status: "submitted" });
   } catch (error) {
     const statusCode = error.response?.status ? 502 : error.statusCode || 500;
