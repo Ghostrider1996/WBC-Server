@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS news_posts (
   tag TEXT NOT NULL DEFAULT 'Update',
   image_url TEXT,
   body TEXT,
+  details TEXT,
   published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -94,6 +95,7 @@ CREATE TABLE IF NOT EXISTS gallery_posts (
   media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
   title TEXT NOT NULL,
   url TEXT NOT NULL,
+  details TEXT,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -136,6 +138,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS battlenet_connected_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS warcraftlogs_enabled BOOLEAN NOT NULL DEFAULT true;
 
 ALTER TABLE characters ADD COLUMN IF NOT EXISTS level INTEGER;
+ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS details TEXT;
+ALTER TABLE gallery_posts ADD COLUMN IF NOT EXISTS details TEXT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_battlenet_id_idx
   ON users (battlenet_id)
