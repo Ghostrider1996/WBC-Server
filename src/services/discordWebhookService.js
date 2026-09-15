@@ -82,18 +82,6 @@ function sanitizeApplicant(applicant) {
   return { discordId, username, globalName, avatar };
 }
 
-function formatApplicantField(applicant) {
-  const parts = [];
-
-  if (applicant.discordId) parts.push(`<@${applicant.discordId}>`);
-  if (applicant.username) parts.push(`@${applicant.username}`);
-  if (applicant.globalName && applicant.globalName.toLowerCase() !== applicant.username.toLowerCase()) {
-    parts.push(applicant.globalName);
-  }
-
-  return parts.join(" · ") || "Unknown";
-}
-
 function getApplicantAuthor(applicant) {
   if (!applicant) return undefined;
 
@@ -143,14 +131,6 @@ async function submitApplication(applicationType, fields, applicantPayload) {
       inline: false,
     }))
     .filter((field) => field.name && field.value);
-
-  if (applicant) {
-    submittedFields.unshift({
-      name: "Discord",
-      value: formatApplicantField(applicant),
-      inline: false,
-    });
-  }
 
   const LOGO_URL = "https://i.postimg.cc/2y7YQNLt/WBC-Logo.png";
   const DEFAULT_BANNER = "https://i.postimg.cc/PfQnFhPs/file-000000007bf882468e45a7f7dd58c06d.png";
