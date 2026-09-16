@@ -144,3 +144,37 @@ ALTER TABLE gallery_posts ADD COLUMN IF NOT EXISTS details TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS users_battlenet_id_idx
   ON users (battlenet_id)
   WHERE battlenet_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS recruitment_classes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  class_name TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL,
+  demand TEXT NOT NULL CHECK (demand IN ('High', 'Medium', 'Low')),
+  tone TEXT NOT NULL CHECK (tone IN ('high', 'medium', 'low')),
+  details TEXT NOT NULL DEFAULT 'No additional details available',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS recruitment_classes_sort_idx
+  ON recruitment_classes (sort_order, class_name);
+
+DROP TRIGGER IF EXISTS recruitment_classes_set_updated_at ON recruitment_classes;
+CREATE TRIGGER recruitment_classes_set_updated_at
+  BEFORE UPDATE ON recruitment_classes
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+INSERT INTO recruitment_classes (class_name, role, demand, tone, details, sort_order)
+VALUES
+  ('Warrior', 'Protection', 'High', 'high', 'No additional details available', 1),
+  ('Paladin', 'Protection / Holy', 'High', 'high', 'No additional details available', 2),
+  ('Priest', 'Discipline / Holy', 'High', 'high', 'No additional details available', 3),
+  ('Druid', 'Restoration / Balance', 'High', 'high', 'No additional details available', 4),
+  ('Shaman', 'Restoration / Elemental', 'High', 'high', 'No additional details available', 5),
+  ('Mage', 'Any DPS spec', 'High', 'high', 'No additional details available', 6),
+  ('Warlock', 'Any DPS spec', 'High', 'high', 'No additional details available', 7),
+  ('Rogue', 'Any DPS spec', 'Low', 'low', 'No additional details available', 8),
+  ('Hunter', 'Any DPS spec', 'High', 'high', 'No additional details available', 9)
+ON CONFLICT (class_name) DO NOTHING;
