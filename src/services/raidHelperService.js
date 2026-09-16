@@ -135,10 +135,22 @@ function matchCharacterToTemplate(event, character) {
 }
 
 function matchStatusClass(event, status) {
-  const className = status === "tentative" ? "Tentative" : "Absence";
-  const klass = findTemplateClass(event?.classes || [], className);
+  const names = status === "tentative"
+    ? ["Tentative", "Maybe"]
+    : ["Absence", "Absent", "Declined"];
+
+  for (const name of names) {
+    const klass = findTemplateClass(event?.classes || [], name);
+    if (klass) {
+      return {
+        className: klass.name || klass.cName,
+        specName: "",
+      };
+    }
+  }
+
   return {
-    className: klass?.name || klass?.cName || className,
+    className: names[0],
     specName: "",
   };
 }
