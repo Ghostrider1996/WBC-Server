@@ -1,5 +1,6 @@
 const { query } = require("../db/pool");
 const { deleteOwnedObject, normalizeObjectKey, resolveSignedMedia, storedMediaValue } = require("./s3Service");
+const { allocateSlug, isPostId } = require("./postSlug");
 
 function formatDisplayDate(value) {
   return new Date(value).toLocaleString("en-US", {
@@ -28,6 +29,7 @@ function parsePublishedAt(dateText) {
 function mapNewsPost(row) {
   return {
     id: row.id,
+    slug: row.slug || "",
     title: row.title,
     tag: row.tag,
     body: row.body || "",
@@ -72,6 +74,7 @@ async function presentGalleryPost(post) {
 const NEWS_SELECT = `
   SELECT
     news_posts.id,
+    news_posts.slug,
     news_posts.title,
     news_posts.tag,
     news_posts.body,
@@ -87,6 +90,16 @@ async function getNewsPostById(id, { signed = false } = {}) {
   const result = await query(`${NEWS_SELECT} WHERE news_posts.id = $1`, [id]);
   const post = result.rows[0] ? mapNewsPost(result.rows[0]) : null;
   return signed ? presentNewsPost(post) : post;
+}
+
+async function getNewsPostByRef(ref, options = {}) {
+  const value = String(ref || "").trim();
+  if (!value) return null;
+  if (isPostId(value)) return getNewsPostById(value, options);
+
+  const result = await query(`${NEWS_SELECT} WHERE news_posts.slug = $1`, [value]);
+  const post = result.rows[0] ? mapNewsPost(result.rows[0]) : null;
+  return options.signed ? presentNewsPost(post) : post;
 }
 
 async function listNewsPosts(limit) {
@@ -106,14 +119,16 @@ async function listNewsPosts(limit) {
 }
 
 async function createNewsPost({ title, tag, image, body, details, publishedAt, date, createdBy }) {
+  const slug = await allocateSlug("news", title);
   const result = await query(
     `
-      INSERT INTO news_posts (title, tag, image_url, body, details, published_at, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO news_posts (title, slug, tag, image_url, body, details, published_at, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id
     `,
     [
       title,
+      slug,
       tag,
       storedMediaValue(image),
       body || null,
@@ -129,6 +144,7 @@ async function createNewsPost({ title, tag, image, body, details, publishedAt, d
 function mapGalleryPost(row) {
   return {
     id: row.id,
+    slug: row.slug || "",
     type: row.media_type,
     mediaType: row.media_type,
     title: row.title,
@@ -139,7 +155,7 @@ function mapGalleryPost(row) {
 }
 
 const GALLERY_SELECT = `
-  SELECT id, media_type, title, url, details, created_at
+  SELECT id, slug, media_type, title, url, details, created_at
   FROM gallery_posts
 `;
 
@@ -147,6 +163,16 @@ async function getGalleryPostById(id, { signed = false } = {}) {
   const result = await query(`${GALLERY_SELECT} WHERE id = $1`, [id]);
   const post = result.rows[0] ? mapGalleryPost(result.rows[0]) : null;
   return signed ? presentGalleryPost(post) : post;
+}
+
+async function getGalleryPostByRef(ref, options = {}) {
+  const value = String(ref || "").trim();
+  if (!value) return null;
+  if (isPostId(value)) return getGalleryPostById(value, options);
+
+  const result = await query(`${GALLERY_SELECT} WHERE slug = $1`, [value]);
+  const post = result.rows[0] ? mapGalleryPost(result.rows[0]) : null;
+  return options.signed ? presentGalleryPost(post) : post;
 }
 
 async function listGalleryPosts() {
@@ -166,14 +192,15 @@ async function createGalleryPost({ mediaType, type, title, url, details }) {
   }
 
   const storedUrl = resolvedType === "image" ? storedMediaValue(url) : (url || null);
+  const slug = await allocateSlug("gallery", title);
 
   const result = await query(
     `
-      INSERT INTO gallery_posts (media_type, title, url, details)
-      VALUES ($1, $2, $3, $4)
-      RETURNING id, media_type, title, url, details, created_at
+      INSERT INTO gallery_posts (media_type, title, slug, url, details)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, slug, media_type, title, url, details, created_at
     `,
-    [resolvedType, title, storedUrl, resolvedType === "image" ? details || null : null],
+    [resolvedType, title, slug, storedUrl, resolvedType === "image" ? details || null : null],
   );
 
   return presentGalleryPost(mapGalleryPost(result.rows[0]));
@@ -193,17 +220,19 @@ async function updateNewsPost(id, { title, tag, image, body, details, publishedA
     `
       UPDATE news_posts
       SET title = $2,
-          tag = $3,
-          image_url = $4,
-          body = $5,
-          details = $6,
-          published_at = $7
+          slug = $3,
+          tag = $4,
+          image_url = $5,
+          body = $6,
+          details = $7,
+          published_at = $8
       WHERE id = $1
       RETURNING id
     `,
     [
       id,
       title,
+      previous.slug || await allocateSlug("news", title, id),
       tag,
       storedMediaValue(image),
       body || null,
@@ -268,12 +297,13 @@ async function updateGalleryPost(id, { mediaType, type, title, url, details }) {
       UPDATE gallery_posts
       SET media_type = $2,
           title = $3,
-          url = $4,
-          details = $5
+          slug = $4,
+          url = $5,
+          details = $6
       WHERE id = $1
-      RETURNING id, media_type, title, url, details, created_at
+      RETURNING id, slug, media_type, title, url, details, created_at
     `,
-    [id, resolvedType, title, storedUrl, resolvedType === "image" ? details || null : null],
+    [id, resolvedType, title, previous.slug || await allocateSlug("gallery", title, id), storedUrl, resolvedType === "image" ? details || null : null],
   );
 
   if (!result.rows[0]) {
@@ -316,11 +346,13 @@ async function deleteGalleryPost(id) {
 module.exports = {
   listNewsPosts,
   getNewsPostById,
+  getNewsPostByRef,
   createNewsPost,
   updateNewsPost,
   deleteNewsPost,
   listGalleryPosts,
   getGalleryPostById,
+  getGalleryPostByRef,
   createGalleryPost,
   updateGalleryPost,
   deleteGalleryPost,

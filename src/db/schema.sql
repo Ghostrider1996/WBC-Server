@@ -77,6 +77,7 @@ CREATE INDEX IF NOT EXISTS raid_signups_event_idx
 CREATE TABLE IF NOT EXISTS news_posts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
+  slug TEXT,
   tag TEXT NOT NULL DEFAULT 'Update',
   image_url TEXT,
   body TEXT,
@@ -94,6 +95,7 @@ CREATE TABLE IF NOT EXISTS gallery_posts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   media_type TEXT NOT NULL CHECK (media_type IN ('image', 'video')),
   title TEXT NOT NULL,
+  slug TEXT,
   url TEXT NOT NULL,
   details TEXT,
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -144,6 +146,17 @@ ALTER TABLE gallery_posts ADD COLUMN IF NOT EXISTS details TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS users_battlenet_id_idx
   ON users (battlenet_id)
   WHERE battlenet_id IS NOT NULL;
+
+ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS slug TEXT;
+ALTER TABLE gallery_posts ADD COLUMN IF NOT EXISTS slug TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS news_posts_slug_idx
+  ON news_posts (slug)
+  WHERE slug IS NOT NULL AND btrim(slug) <> '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS gallery_posts_slug_idx
+  ON gallery_posts (slug)
+  WHERE slug IS NOT NULL AND btrim(slug) <> '';
 
 CREATE TABLE IF NOT EXISTS recruitment_classes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

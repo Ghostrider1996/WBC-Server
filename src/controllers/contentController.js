@@ -2,12 +2,12 @@ const { Router } = require("express");
 const multer = require("multer");
 const {
   listNewsPosts,
-  getNewsPostById,
+  getNewsPostByRef,
   createNewsPost,
   updateNewsPost,
   deleteNewsPost,
   listGalleryPosts,
-  getGalleryPostById,
+  getGalleryPostByRef,
   createGalleryPost,
   updateGalleryPost,
   deleteGalleryPost,
@@ -52,6 +52,23 @@ function readPostId(req, res) {
     return "";
   }
   return id;
+}
+
+function decodeParam(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function readPostRef(req, res) {
+  const value = typeof req.params.id === "string" ? decodeParam(req.params.id).trim() : "";
+  if (!value) {
+    res.status(400).json({ reason: "A valid post is required.", status: "failed" });
+    return "";
+  }
+  return value;
 }
 
 function readNewsFields(req) {
@@ -166,11 +183,11 @@ contentRouter.get("/news", async (req, res) => {
 });
 
 contentRouter.get("/news/:id", async (req, res) => {
-  const id = readPostId(req, res);
-  if (!id) return;
+  const ref = readPostRef(req, res);
+  if (!ref) return;
 
   try {
-    const post = await getNewsPostById(id, { signed: true });
+    const post = await getNewsPostByRef(ref, { signed: true });
     if (!post) {
       return res.status(404).json({ reason: "News post was not found.", status: "failed" });
     }
@@ -252,11 +269,11 @@ contentRouter.get("/gallery", async (_req, res) => {
 });
 
 contentRouter.get("/gallery/:id", async (req, res) => {
-  const id = readPostId(req, res);
-  if (!id) return;
+  const ref = readPostRef(req, res);
+  if (!ref) return;
 
   try {
-    const post = await getGalleryPostById(id, { signed: true });
+    const post = await getGalleryPostByRef(ref, { signed: true });
     if (!post) {
       return res.status(404).json({ reason: "Gallery post was not found.", status: "failed" });
     }
