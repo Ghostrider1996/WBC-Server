@@ -140,6 +140,7 @@ raidHelperRouter.post("/raid-helper/events", async (req, res) => {
       duration: req.body?.duration,
       limit: req.body?.limit,
       image: req.body?.image,
+      channel: req.body?.channel,
     });
 
     return res.status(201).json({ status: "created", event });

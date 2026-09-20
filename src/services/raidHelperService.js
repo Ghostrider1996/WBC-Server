@@ -366,7 +366,30 @@ function requireChannel(channelId, envName, label) {
   throw error;
 }
 
-function resolveChannelId({ raid, title, date } = {}) {
+function normalizeChannelChoice(channel) {
+  const value = String(channel || "").trim().toLowerCase();
+  if (value === "saturday" || value === "sat") return "saturday";
+  if (value === "sunday" || value === "sun") return "sunday";
+  return "";
+}
+
+function saturdayChannel() {
+  return requireChannel(
+    envChannel("RAID_HELPER_SATURDAY_CHANNEL_ID"),
+    "RAID_HELPER_SATURDAY_CHANNEL_ID",
+    "Saturday raids",
+  );
+}
+
+function sundayChannel() {
+  return requireChannel(
+    envChannel("RAID_HELPER_SUNDAY_CHANNEL_ID") || envChannel("RAID_HELPER_CHANNEL_ID"),
+    "RAID_HELPER_SUNDAY_CHANNEL_ID",
+    "Sunday raids",
+  );
+}
+
+function resolveChannelId({ raid, title, date, channel } = {}) {
   if (isKarazhanEvent(raid, title)) {
     return requireChannel(
       envChannel("RAID_HELPER_KARA_CHANNEL_ID"),
@@ -375,24 +398,15 @@ function resolveChannelId({ raid, title, date } = {}) {
     );
   }
 
+  const choice = normalizeChannelChoice(channel);
+  if (choice === "saturday") return saturdayChannel();
+  if (choice === "sunday") return sundayChannel();
+
   const weekday = getCalendarWeekday(date);
-  if (weekday === 6) {
-    return requireChannel(
-      envChannel("RAID_HELPER_SATURDAY_CHANNEL_ID"),
-      "RAID_HELPER_SATURDAY_CHANNEL_ID",
-      "Saturday raids",
-    );
-  }
+  if (weekday === 6) return saturdayChannel();
+  if (weekday === 0) return sundayChannel();
 
-  if (weekday === 0) {
-    return requireChannel(
-      envChannel("RAID_HELPER_SUNDAY_CHANNEL_ID") || envChannel("RAID_HELPER_CHANNEL_ID"),
-      "RAID_HELPER_SUNDAY_CHANNEL_ID",
-      "Sunday raids",
-    );
-  }
-
-  const error = new Error("Karazhan can be posted any day. Other raids must be scheduled on Saturday or Sunday.");
+  const error = new Error("Choose the Saturday or Sunday Discord channel.");
   error.statusCode = 400;
   throw error;
 }
@@ -435,6 +449,7 @@ async function createEvent({
   duration,
   limit,
   image,
+  channel,
 }) {
   const eventTitle = String(title || "").trim();
   const eventDate = toRaidHelperDate(date);
@@ -448,7 +463,7 @@ async function createEvent({
   }
 
   const { serverId } = getRaidHelperConfig();
-  const resolvedChannelId = resolveChannelId({ raid, title: eventTitle, date });
+  const resolvedChannelId = resolveChannelId({ raid, title: eventTitle, date, channel });
 
   const advancedSettings = compactPayload({
     duration: Number(duration) > 0 ? Number(duration) : undefined,
