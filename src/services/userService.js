@@ -52,6 +52,7 @@ async function findUserByDiscordId(discordId) {
         id,
         discord_id,
         username,
+        global_name,
         battlenet_id,
         battlenet_battletag,
         battlenet_access_token,

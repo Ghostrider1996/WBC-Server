@@ -14,6 +14,18 @@ const TANK_SPECS = {
 };
 
 const TBC_ANNIVERSARY_TEMPLATE = "wowtbc";
+const WOW_SIGNUP_CLASSES = new Set([
+  "warrior",
+  "paladin",
+  "hunter",
+  "rogue",
+  "priest",
+  "shaman",
+  "mage",
+  "warlock",
+  "druid",
+  "tank",
+]);
 
 function cleanEnvValue(value) {
   if (!value || typeof value !== "string") return "";
@@ -155,6 +167,33 @@ function matchStatusClass(event, status) {
   };
 }
 
+function matchGenericSignup(event) {
+  const skipped = new Set(["tentative", "maybe", "absence", "absent", "declined", "late"]);
+  const classes = event?.classes || [];
+  const klass = classes.find((entry) => !skipped.has(compact(entry.name || entry.cName)))
+    || classes[0]
+    || null;
+
+  if (!klass) {
+    return { className: "Accepted", specName: "" };
+  }
+
+  const spec = (klass.specs || [])[0] || null;
+  return templateSelection(klass, spec) || {
+    className: klass.name || klass.cName,
+    specName: spec?.name || spec?.cName || "",
+    roleName: spec?.roleName || spec?.cRoleName || "",
+  };
+}
+
+function hasWowSignupClasses(event) {
+  return (event?.classes || []).some((entry) => WOW_SIGNUP_CLASSES.has(compact(entry.name || entry.cName)));
+}
+
+function isGenericRaidHelperEvent(event) {
+  return !hasWowSignupClasses(event);
+}
+
 function findExistingSignup(event, userId) {
   const collections = [event.signUps, event.signups, event.participants];
   for (const collection of collections) {
@@ -263,15 +302,18 @@ async function saveSignup(eventId, payload, existingSignup) {
   }
 }
 
-async function signUpForEvent({ eventId, userId, character, status }) {
-  const event = await getEventById(eventId);
+async function signUpForEvent({ eventId, userId, character, status, displayName, event: loadedEvent }) {
+  const event = loadedEvent || await getEventById(eventId);
+  const generic = isGenericRaidHelperEvent(event);
   const signupStatus = status === "tentative" || status === "absence" ? status : "primary";
   const selection = signupStatus === "primary"
-    ? matchCharacterToTemplate(event, character)
+    ? (generic ? matchGenericSignup(event) : matchCharacterToTemplate(event, character))
     : matchStatusClass(event, signupStatus);
 
   if (!selection) {
-    const error = new Error("That character does not match a class or spec on this raid.");
+    const error = new Error(generic
+      ? "This event does not have a sign-up option available."
+      : "That character does not match a class or spec on this raid.");
     error.statusCode = 400;
     throw error;
   }
@@ -280,7 +322,7 @@ async function signUpForEvent({ eventId, userId, character, status }) {
     userId: String(userId),
     className: selection.className,
     specName: selection.specName || undefined,
-    name: character?.name || undefined,
+    name: character?.name || displayName || undefined,
   }, findExistingSignup(event, userId));
 }
 
@@ -435,4 +477,4 @@ async function createEvent({
   }
 }
 
-module.exports = { getServerEvents, signUpForEvent, deleteEvent, createEvent };
+module.exports = { getServerEvents, getEventById, signUpForEvent, deleteEvent, createEvent, isGenericRaidHelperEvent };

@@ -1,5 +1,5 @@
 const { Router } = require("express");
-const { getServerEvents, signUpForEvent, deleteEvent, createEvent } = require("../services/raidHelperService");
+const { getServerEvents, getEventById, signUpForEvent, deleteEvent, createEvent, isGenericRaidHelperEvent } = require("../services/raidHelperService");
 const { findUserByDiscordId } = require("../services/userService");
 const { getCharacterForUser } = require("../services/characterService");
 const { canManageRaidEvents } = require("../services/discordGuildService");
@@ -54,12 +54,16 @@ raidHelperRouter.post("/raid-helper/events/:eventId/signups", async (req, res) =
     if (!user) {
       return res.status(401).json({ reason: "Sign in with Discord first.", status: "failed" });
     }
-    if (!user.battlenet_id) {
+
+    const event = await getEventById(eventId);
+    const generic = isGenericRaidHelperEvent(event);
+
+    if (!generic && !user.battlenet_id) {
       return res.status(403).json({ reason: "Connect your Battle.net account first.", status: "failed" });
     }
 
     let character = null;
-    if (status === "primary") {
+    if (status === "primary" && !generic) {
       if (!characterId) {
         return res.status(400).json({ reason: "Choose a character to sign up with.", status: "failed" });
       }
@@ -77,9 +81,11 @@ raidHelperRouter.post("/raid-helper/events/:eventId/signups", async (req, res) =
 
     await signUpForEvent({
       eventId,
+      event,
       userId: discordId,
       character,
       status,
+      displayName: user.global_name || user.username || req.body?.globalName || req.body?.username,
     });
 
     return res.status(200).json({ status: "signed" });
