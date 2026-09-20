@@ -149,13 +149,12 @@ function mapGalleryPost(row) {
     mediaType: row.media_type,
     title: row.title,
     url: row.url,
-    details: row.media_type === "image" ? (row.details || "") : "",
     createdAt: row.created_at,
   };
 }
 
 const GALLERY_SELECT = `
-  SELECT id, slug, media_type, title, url, details, created_at
+  SELECT id, slug, media_type, title, url, created_at
   FROM gallery_posts
 `;
 
@@ -184,7 +183,7 @@ async function listGalleryPosts() {
   return Promise.all(result.rows.map((row) => presentGalleryPost(mapGalleryPost(row))));
 }
 
-async function createGalleryPost({ mediaType, type, title, url, details }) {
+async function createGalleryPost({ mediaType, type, title, url }) {
   const resolvedType = mediaType || type;
 
   if (!["image", "video"].includes(resolvedType)) {
@@ -196,11 +195,11 @@ async function createGalleryPost({ mediaType, type, title, url, details }) {
 
   const result = await query(
     `
-      INSERT INTO gallery_posts (media_type, title, slug, url, details)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, slug, media_type, title, url, details, created_at
+      INSERT INTO gallery_posts (media_type, title, slug, url)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, slug, media_type, title, url, created_at
     `,
-    [resolvedType, title, slug, storedUrl, resolvedType === "image" ? details || null : null],
+    [resolvedType, title, slug, storedUrl],
   );
 
   return presentGalleryPost(mapGalleryPost(result.rows[0]));
@@ -278,7 +277,7 @@ async function deleteNewsPost(id) {
   }
 }
 
-async function updateGalleryPost(id, { mediaType, type, title, url, details }) {
+async function updateGalleryPost(id, { mediaType, type, title, url }) {
   const previous = await getGalleryPostById(id);
   if (!previous) {
     throw missingPostError("Gallery");
@@ -299,11 +298,11 @@ async function updateGalleryPost(id, { mediaType, type, title, url, details }) {
           title = $3,
           slug = $4,
           url = $5,
-          details = $6
+          details = NULL
       WHERE id = $1
-      RETURNING id, slug, media_type, title, url, details, created_at
+      RETURNING id, slug, media_type, title, url, created_at
     `,
-    [id, resolvedType, title, previous.slug || await allocateSlug("gallery", title, id), storedUrl, resolvedType === "image" ? details || null : null],
+    [id, resolvedType, title, previous.slug || await allocateSlug("gallery", title, id), storedUrl],
   );
 
   if (!result.rows[0]) {

@@ -103,7 +103,6 @@ function readGalleryFields(req) {
     mediaType,
     title,
     url,
-    details: mediaType === "image" && typeof req.body?.details === "string" ? req.body.details.trim() : "",
   };
 }
 
