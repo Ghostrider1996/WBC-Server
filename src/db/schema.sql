@@ -162,8 +162,8 @@ CREATE TABLE IF NOT EXISTS recruitment_classes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   class_name TEXT NOT NULL UNIQUE,
   role TEXT NOT NULL,
-  demand TEXT NOT NULL CHECK (demand IN ('High', 'Medium', 'Low')),
-  tone TEXT NOT NULL CHECK (tone IN ('high', 'medium', 'low')),
+  demand TEXT NOT NULL CHECK (demand IN ('High', 'Medium', 'Low', 'Closed')),
+  tone TEXT NOT NULL CHECK (tone IN ('high', 'medium', 'low', 'closed')),
   details TEXT NOT NULL DEFAULT 'No additional details available',
   sort_order INTEGER NOT NULL DEFAULT 0,
   updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -173,6 +173,15 @@ CREATE TABLE IF NOT EXISTS recruitment_classes (
 
 CREATE INDEX IF NOT EXISTS recruitment_classes_sort_idx
   ON recruitment_classes (sort_order, class_name);
+
+ALTER TABLE recruitment_classes DROP CONSTRAINT IF EXISTS recruitment_classes_demand_check;
+ALTER TABLE recruitment_classes DROP CONSTRAINT IF EXISTS recruitment_classes_tone_check;
+ALTER TABLE recruitment_classes
+  ADD CONSTRAINT recruitment_classes_demand_check
+  CHECK (demand IN ('High', 'Medium', 'Low', 'Closed'));
+ALTER TABLE recruitment_classes
+  ADD CONSTRAINT recruitment_classes_tone_check
+  CHECK (tone IN ('high', 'medium', 'low', 'closed'));
 
 DROP TRIGGER IF EXISTS recruitment_classes_set_updated_at ON recruitment_classes;
 CREATE TRIGGER recruitment_classes_set_updated_at

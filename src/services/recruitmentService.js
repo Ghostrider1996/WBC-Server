@@ -5,6 +5,7 @@ const DEMAND_TONES = {
   High: "high",
   Medium: "medium",
   Low: "low",
+  Closed: "closed",
 };
 
 const DEFAULT_DETAILS = "No additional details available";
@@ -58,7 +59,7 @@ async function updateRecruitmentStatuses(statuses, updatedBy) {
       const details = cleanDetails(item?.details);
 
       if (!className || !tone || !role || !getRecruitmentSpecOptions(className).includes(role)) {
-        const error = new Error("Each class needs a High, Medium, or Low demand and a valid spec option.");
+        const error = new Error("Each class needs a High, Medium, Low, or Closed demand and a valid spec option.");
         error.statusCode = 400;
         throw error;
       }
