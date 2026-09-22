@@ -14,6 +14,7 @@ const TANK_SPECS = {
 };
 
 const TBC_ANNIVERSARY_TEMPLATE = "wowtbc";
+const DEFAULT_RAID_EVENT_IMAGE = "https://wbchq-assets.s3.us-east-1.amazonaws.com/discord/warcraftforever.jpg";
 const WOW_SIGNUP_CLASSES = new Set([
   "warrior",
   "paladin",
@@ -468,7 +469,7 @@ async function createEvent({
   const advancedSettings = compactPayload({
     duration: Number(duration) > 0 ? Number(duration) : undefined,
     limit: Number(limit) > 0 ? Number(limit) : undefined,
-    image: String(image || "").trim() || undefined,
+    image: String(image || "").trim() || DEFAULT_RAID_EVENT_IMAGE,
     description: String(description || "").trim() || undefined,
   });
 
