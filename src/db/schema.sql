@@ -245,6 +245,10 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 CREATE INDEX IF NOT EXISTS poll_votes_poll_user_idx
   ON poll_votes (poll_id, user_id);
 
+DROP INDEX IF EXISTS poll_votes_one_per_user_idx;
+
+UPDATE polls SET allow_multiple = true;
+
 DROP TRIGGER IF EXISTS polls_set_updated_at ON polls;
 CREATE TRIGGER polls_set_updated_at
   BEFORE UPDATE ON polls

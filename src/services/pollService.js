@@ -5,13 +5,24 @@ const MAX_OPTIONS = 10;
 const MAX_QUESTION_LENGTH = 300;
 const MAX_OPTION_LENGTH = 100;
 
-function badRequest(message) {
+function badRequest(message, statusCode = 400) {
   const error = new Error(message);
-  error.statusCode = 400;
+  error.statusCode = statusCode;
   return error;
 }
 
-function mapPoll(rows) {
+function withViewerVotes(poll, votedOptionIds = []) {
+  if (!poll) return null;
+
+  return {
+    ...poll,
+    votedOptionIds,
+    votedOptionId: votedOptionIds[0] || null,
+    hasVoted: votedOptionIds.length > 0,
+  };
+}
+
+function mapPoll(rows, votedOptionIds = []) {
   if (!rows.length) return null;
 
   const first = rows[0];
@@ -24,7 +35,7 @@ function mapPoll(rows) {
       votes: Number(row.vote_count || 0),
     }));
 
-  return {
+  return withViewerVotes({
     id: first.id,
     question: first.question,
     allowMultiple: Boolean(first.allow_multiple),
@@ -32,7 +43,7 @@ function mapPoll(rows) {
     createdAt: first.created_at,
     author: first.author_name || "",
     options,
-  };
+  }, votedOptionIds);
 }
 
 const POLL_SELECT = `
@@ -53,9 +64,30 @@ const POLL_SELECT = `
   LEFT JOIN poll_votes ON poll_votes.option_id = poll_options.id
 `;
 
-async function getPollById(id, client = null) {
-  const runner = client || { query };
-  const result = await runner.query(
+async function getViewerVotes(userId) {
+  const votes = new Map();
+  if (!userId) return votes;
+
+  const result = await query(
+    `
+      SELECT poll_id, option_id
+      FROM poll_votes
+      WHERE user_id = $1
+    `,
+    [userId],
+  );
+
+  for (const row of result.rows) {
+    const current = votes.get(row.poll_id) || [];
+    current.push(row.option_id);
+    votes.set(row.poll_id, current);
+  }
+
+  return votes;
+}
+
+async function getPollById(id, userId = null) {
+  const result = await query(
     `
       ${POLL_SELECT}
       WHERE polls.id = $1
@@ -65,7 +97,8 @@ async function getPollById(id, client = null) {
     [id],
   );
 
-  return mapPoll(result.rows);
+  const votes = await getViewerVotes(userId);
+  return mapPoll(result.rows, votes.get(id) || []);
 }
 
 function cleanOptions(rawOptions) {
@@ -93,7 +126,7 @@ function cleanOptions(rawOptions) {
   return options;
 }
 
-async function listPolls() {
+async function listPolls(userId) {
   const result = await query(`
     ${POLL_SELECT}
     GROUP BY polls.id, users.global_name, users.username, poll_options.id
@@ -122,10 +155,11 @@ async function listPolls() {
     }
   }
 
-  return polls;
+  const votes = await getViewerVotes(userId);
+  return polls.map((poll) => withViewerVotes(poll, votes.get(poll.id) || []));
 }
 
-async function createPoll({ question, options, createdBy }) {
+async function createPoll({ question, options, allowMultiple, createdBy }) {
   const cleanedQuestion = String(question || "").trim().slice(0, MAX_QUESTION_LENGTH);
   if (!cleanedQuestion) {
     throw badRequest("A poll question is required.");
@@ -139,11 +173,11 @@ async function createPoll({ question, options, createdBy }) {
 
     const pollResult = await client.query(
       `
-        INSERT INTO polls (question, created_by)
-        VALUES ($1, $2)
+        INSERT INTO polls (question, allow_multiple, created_by)
+        VALUES ($1, $2, $3)
         RETURNING id
       `,
-      [cleanedQuestion, createdBy || null],
+      [cleanedQuestion, Boolean(allowMultiple), createdBy || null],
     );
 
     const pollId = pollResult.rows[0].id;
@@ -159,7 +193,7 @@ async function createPoll({ question, options, createdBy }) {
     }
 
     await client.query("COMMIT");
-    return getPollById(pollId);
+    return getPollById(pollId, createdBy || null);
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -168,10 +202,86 @@ async function createPoll({ question, options, createdBy }) {
   }
 }
 
+async function voteOnPoll({ pollId, optionId, userId, discordUserId }) {
+  if (!userId) {
+    throw badRequest("Sign in with Discord to vote.", 401);
+  }
+
+  if (!pollId || !optionId) {
+    throw badRequest("A poll option is required.");
+  }
+
+  const pollResult = await query(
+    `
+      SELECT id, allow_multiple, ends_at
+      FROM polls
+      WHERE id = $1
+    `,
+    [pollId],
+  );
+  const poll = pollResult.rows[0];
+
+  if (!poll) {
+    throw badRequest("This poll could not be found.", 404);
+  }
+
+  if (poll.ends_at && new Date(poll.ends_at).getTime() <= Date.now()) {
+    throw badRequest("This poll is closed.");
+  }
+
+  const optionResult = await query(
+    `
+      SELECT id
+      FROM poll_options
+      WHERE id = $1 AND poll_id = $2
+    `,
+    [optionId, pollId],
+  );
+
+  if (!optionResult.rows[0]) {
+    throw badRequest("That option is not part of this poll.", 404);
+  }
+
+  const existing = await query(
+    `
+      SELECT option_id
+      FROM poll_votes
+      WHERE poll_id = $1 AND user_id = $2
+    `,
+    [pollId, userId],
+  );
+
+  if (existing.rows.some((row) => row.option_id === optionId)) {
+    throw badRequest("You have already voted for that option.", 409);
+  }
+
+  if (!poll.allow_multiple && existing.rows.length > 0) {
+    throw badRequest("You have already voted on this poll.", 409);
+  }
+
+  try {
+    await query(
+      `
+        INSERT INTO poll_votes (poll_id, option_id, user_id, discord_user_id)
+        VALUES ($1, $2, $3, $4)
+      `,
+      [pollId, optionId, userId, discordUserId || null],
+    );
+  } catch (error) {
+    if (error.code === "23505") {
+      throw badRequest("You have already voted for that option.", 409);
+    }
+    throw error;
+  }
+
+  return getPollById(pollId, userId);
+}
+
 module.exports = {
   listPolls,
   createPoll,
   getPollById,
+  voteOnPoll,
   MIN_OPTIONS,
   MAX_OPTIONS,
 };
