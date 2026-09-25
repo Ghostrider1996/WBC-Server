@@ -202,13 +202,19 @@ async function createPoll({ question, options, allowMultiple, createdBy }) {
   }
 }
 
-async function voteOnPoll({ pollId, optionId, userId, discordUserId }) {
+async function voteOnPoll({ pollId, optionIds, userId, discordUserId }) {
   if (!userId) {
     throw badRequest("Sign in with Discord to vote.", 401);
   }
 
-  if (!pollId || !optionId) {
-    throw badRequest("A poll option is required.");
+  const selectedIds = [...new Set(
+    (Array.isArray(optionIds) ? optionIds : [optionIds])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean),
+  )];
+
+  if (!pollId || selectedIds.length === 0) {
+    throw badRequest("Select at least one option to vote.");
   }
 
   const pollResult = await query(
@@ -229,49 +235,86 @@ async function voteOnPoll({ pollId, optionId, userId, discordUserId }) {
     throw badRequest("This poll is closed.");
   }
 
+  if (!poll.allow_multiple && selectedIds.length > 1) {
+    throw badRequest("This poll only allows one answer.");
+  }
+
   const optionResult = await query(
     `
       SELECT id
       FROM poll_options
-      WHERE id = $1 AND poll_id = $2
+      WHERE poll_id = $1 AND id = ANY($2::uuid[])
     `,
-    [optionId, pollId],
+    [pollId, selectedIds],
   );
 
-  if (!optionResult.rows[0]) {
-    throw badRequest("That option is not part of this poll.", 404);
+  if (optionResult.rows.length !== selectedIds.length) {
+    throw badRequest("One or more options are not part of this poll.", 404);
   }
 
   const existing = await query(
     `
-      SELECT option_id
+      SELECT id
       FROM poll_votes
       WHERE poll_id = $1 AND user_id = $2
+      LIMIT 1
     `,
     [pollId, userId],
   );
 
-  if (existing.rows.some((row) => row.option_id === optionId)) {
-    throw badRequest("You have already voted for that option.", 409);
+  if (existing.rows[0]) {
+    throw badRequest("Remove your current vote before voting again.", 409);
   }
 
-  if (!poll.allow_multiple && existing.rows.length > 0) {
-    throw badRequest("You have already voted on this poll.", 409);
-  }
+  const client = await getPool().connect();
 
   try {
-    await query(
-      `
-        INSERT INTO poll_votes (poll_id, option_id, user_id, discord_user_id)
-        VALUES ($1, $2, $3, $4)
-      `,
-      [pollId, optionId, userId, discordUserId || null],
-    );
+    await client.query("BEGIN");
+
+    for (const optionId of selectedIds) {
+      await client.query(
+        `
+          INSERT INTO poll_votes (poll_id, option_id, user_id, discord_user_id)
+          VALUES ($1, $2, $3, $4)
+        `,
+        [pollId, optionId, userId, discordUserId || null],
+      );
+    }
+
+    await client.query("COMMIT");
   } catch (error) {
+    await client.query("ROLLBACK");
     if (error.code === "23505") {
-      throw badRequest("You have already voted for that option.", 409);
+      throw badRequest("You have already voted on this poll.", 409);
     }
     throw error;
+  } finally {
+    client.release();
+  }
+
+  return getPollById(pollId, userId);
+}
+
+async function removePollVotes({ pollId, userId }) {
+  if (!userId) {
+    throw badRequest("Sign in with Discord to remove a vote.", 401);
+  }
+
+  if (!pollId) {
+    throw badRequest("A poll is required.");
+  }
+
+  const result = await query(
+    `
+      DELETE FROM poll_votes
+      WHERE poll_id = $1 AND user_id = $2
+      RETURNING id
+    `,
+    [pollId, userId],
+  );
+
+  if (result.rowCount === 0) {
+    throw badRequest("You have not voted on this poll.", 404);
   }
 
   return getPollById(pollId, userId);
@@ -282,6 +325,7 @@ module.exports = {
   createPoll,
   getPollById,
   voteOnPoll,
+  removePollVotes,
   MIN_OPTIONS,
   MAX_OPTIONS,
 };
