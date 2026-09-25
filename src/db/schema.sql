@@ -200,3 +200,52 @@ VALUES
   ('Rogue', 'Any DPS spec', 'Low', 'low', 'No additional details available', 8),
   ('Hunter', 'Any DPS spec', 'High', 'high', 'No additional details available', 9)
 ON CONFLICT (class_name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS polls (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  question TEXT NOT NULL,
+  allow_multiple BOOLEAN NOT NULL DEFAULT false,
+  ends_at TIMESTAMPTZ,
+  discord_message_id TEXT,
+  discord_channel_id TEXT,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS polls_discord_message_id_idx
+  ON polls (discord_message_id)
+  WHERE discord_message_id IS NOT NULL AND btrim(discord_message_id) <> '';
+
+CREATE INDEX IF NOT EXISTS polls_created_at_idx
+  ON polls (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS poll_options (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  poll_id UUID NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  discord_answer_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS poll_options_poll_id_idx
+  ON poll_options (poll_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  poll_id UUID NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+  option_id UUID NOT NULL REFERENCES poll_options(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  discord_user_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (option_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS poll_votes_poll_user_idx
+  ON poll_votes (poll_id, user_id);
+
+DROP TRIGGER IF EXISTS polls_set_updated_at ON polls;
+CREATE TRIGGER polls_set_updated_at
+  BEFORE UPDATE ON polls
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();

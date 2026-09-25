@@ -6,6 +6,7 @@ const contentRouter = require("../controllers/contentController");
 const characterRouter = require("../controllers/characterController");
 const raidAssignmentsRouter = require("../controllers/raidAssignmentsController");
 const recruitmentRouter = require("../controllers/recruitmentController");
+const pollRouter = require("../controllers/pollController");
 
 function configRoutes(app) {
   app.use("/api", raidHelperRouter);
@@ -16,6 +17,7 @@ function configRoutes(app) {
   app.use("/api", characterRouter);
   app.use("/api", raidAssignmentsRouter);
   app.use("/api", recruitmentRouter);
+  app.use("/api", pollRouter);
 }
 
 module.exports = { configRoutes };
