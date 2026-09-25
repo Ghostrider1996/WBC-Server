@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const { isAdmin } = require("../services/adminService");
 const { findUserByDiscordId } = require("../services/userService");
-const { createPoll, listPolls, removePollVotes, voteOnPoll } = require("../services/pollService");
+const { createPoll, getPollVoters, listPolls, removePollVotes, voteOnPoll } = require("../services/pollService");
 
 const pollRouter = Router();
 const POLL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -86,6 +86,21 @@ pollRouter.post("/polls", async (req, res) => {
     return res.status(201).json(poll);
   } catch (error) {
     return handlePollError(res, error, "The poll could not be created.");
+  }
+});
+
+pollRouter.get("/polls/:id/voters", async (req, res) => {
+  try {
+    const pollId = readPollId(req, res);
+    if (!pollId) return;
+
+    const user = await resolveUser(req, res, { required: true });
+    if (!user) return;
+
+    const poll = await getPollVoters(pollId);
+    return res.status(200).json(poll);
+  } catch (error) {
+    return handlePollError(res, error, "Poll votes could not be loaded.");
   }
 });
 

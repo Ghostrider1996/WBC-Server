@@ -320,12 +320,57 @@ async function removePollVotes({ pollId, userId }) {
   return getPollById(pollId, userId);
 }
 
+async function getPollVoters(pollId) {
+  const poll = await getPollById(pollId);
+  if (!poll) {
+    throw badRequest("This poll could not be found.", 404);
+  }
+
+  const result = await query(
+    `
+      SELECT
+        poll_votes.option_id,
+        users.discord_id,
+        users.username,
+        users.global_name,
+        users.avatar
+      FROM poll_votes
+      JOIN users ON users.id = poll_votes.user_id
+      WHERE poll_votes.poll_id = $1
+      ORDER BY poll_votes.created_at ASC, users.username ASC
+    `,
+    [pollId],
+  );
+
+  const votersByOption = new Map();
+  for (const row of result.rows) {
+    const voters = votersByOption.get(row.option_id) || [];
+    voters.push({
+      discordId: row.discord_id,
+      username: row.username,
+      globalName: row.global_name || row.username,
+      avatar: row.avatar || "",
+    });
+    votersByOption.set(row.option_id, voters);
+  }
+
+  return {
+    id: poll.id,
+    question: poll.question,
+    options: poll.options.map((option) => ({
+      ...option,
+      voters: votersByOption.get(option.id) || [],
+    })),
+  };
+}
+
 module.exports = {
   listPolls,
   createPoll,
   getPollById,
   voteOnPoll,
   removePollVotes,
+  getPollVoters,
   MIN_OPTIONS,
   MAX_OPTIONS,
 };
