@@ -4,45 +4,23 @@ const {
   getDiscordAuthorizationUrl,
 } = require("../services/discordAuthService");
 const { upsertDiscordUser } = require("../services/userService");
+const {
+  callbackUri,
+  decodeOAuthState,
+  defaultWebOrigin,
+  encodeOAuthState,
+  sanitizeOrigin,
+} = require("../services/webOrigin");
 
 const discordAuthRouter = Router();
+const CALLBACK_PATH = "/api/auth/discord/callback";
 
-function isLocalHost(value) {
-  return /localhost|127\.0\.0\.1/i.test(value || "");
+function resolveWebOrigin(origin) {
+  return sanitizeOrigin(origin) || defaultWebOrigin();
 }
 
-function resolveWebOrigin() {
-  const configured = (process.env.WBC_WEB_ORIGIN || "")
-    .split(",")
-    .map((origin) => origin.trim().replace(/\/$/, ""))
-    .find((origin) => origin && !isLocalHost(origin));
-
-  if (configured) {
-    return configured;
-  }
-
-  if (process.env.RENDER === "true" || process.env.NODE_ENV === "production") {
-    return "https://www.wbchq.com";
-  }
-
-  return "http://localhost:5173";
-}
-
-function resolveRedirectUri(req) {
-  const configured = process.env.DISCORD_REDIRECT_URI || "";
-
-  if (configured && !isLocalHost(configured)) {
-    return configured;
-  }
-
-  const proto = (req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim();
-  const host = req.get("host");
-
-  if (host && !isLocalHost(host)) {
-    return `${proto}://${host}/api/auth/discord/callback`;
-  }
-
-  return configured || "http://localhost:3030/api/auth/discord/callback";
+function resolveRedirectUri(origin) {
+  return callbackUri(resolveWebOrigin(origin), CALLBACK_PATH);
 }
 
 function sanitizeReturnTo(value) {
@@ -71,8 +49,10 @@ function encodeUser(user) {
 discordAuthRouter.get("/auth/discord", (req, res) => {
   try {
     const returnTo = sanitizeReturnTo(req.query.returnTo);
-    const redirectUri = resolveRedirectUri(req);
-    return res.redirect(getDiscordAuthorizationUrl(returnTo, redirectUri));
+    const origin = resolveWebOrigin(req.query.origin);
+    const redirectUri = resolveRedirectUri(origin);
+    const state = encodeOAuthState({ returnTo, origin });
+    return res.redirect(getDiscordAuthorizationUrl(state, redirectUri));
   } catch (error) {
     return res.status(500).json({ reason: error.message });
   }
@@ -80,16 +60,17 @@ discordAuthRouter.get("/auth/discord", (req, res) => {
 
 discordAuthRouter.get("/auth/discord/callback", async (req, res) => {
   const { code, error, error_description: errorDescription, state } = req.query;
-  const returnTo = sanitizeReturnTo(state);
-  const redirectUri = resolveRedirectUri(req);
-  const webOrigin = resolveWebOrigin();
+  const decoded = decodeOAuthState(state);
+  const returnTo = sanitizeReturnTo(decoded.returnTo);
+  const origin = resolveWebOrigin(decoded.origin);
+  const redirectUri = resolveRedirectUri(origin);
 
   if (error || !code) {
     const params = new URLSearchParams({
       discord_error: error || "authorization_failed",
       ...(errorDescription ? { discord_error_description: errorDescription } : {}),
     });
-    return res.redirect(`${webOrigin}${returnTo}#${params.toString()}`);
+    return res.redirect(`${origin}${returnTo}#${params.toString()}`);
   }
 
   try {
@@ -101,7 +82,7 @@ discordAuthRouter.get("/auth/discord/callback", async (req, res) => {
       console.error("Discord user upsert failed:", databaseError.message);
     }
 
-    return res.redirect(`${webOrigin}${returnTo}#discord_user=${encodeUser(profile)}`);
+    return res.redirect(`${origin}${returnTo}#discord_user=${encodeUser(profile)}`);
   } catch (authError) {
     const discordError = authError.response?.data?.error || authError.code || "exchange_failed";
     const status = authError.response?.status || authError.statusCode || "unknown_status";
@@ -111,7 +92,7 @@ discordAuthRouter.get("/auth/discord/callback", async (req, res) => {
       discord_error: "login_failed",
       discord_error_description: `${discordError} (${status})`,
     });
-    return res.redirect(`${webOrigin}${returnTo}#${params.toString()}`);
+    return res.redirect(`${origin}${returnTo}#${params.toString()}`);
   }
 });
 
