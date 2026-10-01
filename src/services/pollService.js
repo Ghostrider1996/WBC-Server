@@ -11,11 +11,22 @@ function badRequest(message, statusCode = 400) {
   return error;
 }
 
+function isClosedPoll(poll) {
+  if (!poll) return false;
+  if (String(poll.status || "").toLowerCase() === "closed") return true;
+  if (poll.ends_at && new Date(poll.ends_at).getTime() <= Date.now()) return true;
+  return false;
+}
+
 function withViewerVotes(poll, votedOptionIds = []) {
   if (!poll) return null;
 
+  const closed = isClosedPoll(poll);
+
   return {
     ...poll,
+    status: closed ? "closed" : (poll.status || "open"),
+    closed,
     votedOptionIds,
     votedOptionId: votedOptionIds[0] || null,
     hasVoted: votedOptionIds.length > 0,
@@ -40,6 +51,7 @@ function mapPoll(rows, votedOptionIds = []) {
     question: first.question,
     allowMultiple: Boolean(first.allow_multiple),
     endsAt: first.ends_at,
+    status: first.status || "open",
     createdAt: first.created_at,
     author: first.author_name || "",
     options,
@@ -52,6 +64,7 @@ const POLL_SELECT = `
     polls.question,
     polls.allow_multiple,
     polls.ends_at,
+    polls.status,
     polls.created_at,
     COALESCE(users.global_name, users.username, '') AS author_name,
     poll_options.id AS option_id,
@@ -219,7 +232,7 @@ async function voteOnPoll({ pollId, optionIds, userId, discordUserId }) {
 
   const pollResult = await query(
     `
-      SELECT id, allow_multiple, ends_at
+      SELECT id, allow_multiple, ends_at, status
       FROM polls
       WHERE id = $1
     `,
@@ -231,7 +244,7 @@ async function voteOnPoll({ pollId, optionIds, userId, discordUserId }) {
     throw badRequest("This poll could not be found.", 404);
   }
 
-  if (poll.ends_at && new Date(poll.ends_at).getTime() <= Date.now()) {
+  if (isClosedPoll(poll)) {
     throw badRequest("This poll is closed.");
   }
 
@@ -304,6 +317,24 @@ async function removePollVotes({ pollId, userId }) {
     throw badRequest("A poll is required.");
   }
 
+  const pollResult = await query(
+    `
+      SELECT id, ends_at, status
+      FROM polls
+      WHERE id = $1
+    `,
+    [pollId],
+  );
+  const poll = pollResult.rows[0];
+
+  if (!poll) {
+    throw badRequest("This poll could not be found.", 404);
+  }
+
+  if (isClosedPoll(poll)) {
+    throw badRequest("This poll is closed.");
+  }
+
   const result = await query(
     `
       DELETE FROM poll_votes
@@ -364,6 +395,29 @@ async function getPollVoters(pollId) {
   };
 }
 
+async function closePoll(pollId) {
+  if (!pollId) {
+    throw badRequest("A poll is required.");
+  }
+
+  const result = await query(
+    `
+      UPDATE polls
+      SET status = 'closed',
+          ends_at = COALESCE(ends_at, now())
+      WHERE id = $1
+      RETURNING id
+    `,
+    [pollId],
+  );
+
+  if (!result.rows[0]) {
+    throw badRequest("This poll could not be found.", 404);
+  }
+
+  return getPollById(pollId);
+}
+
 module.exports = {
   listPolls,
   createPoll,
@@ -371,6 +425,7 @@ module.exports = {
   voteOnPoll,
   removePollVotes,
   getPollVoters,
+  closePoll,
   MIN_OPTIONS,
   MAX_OPTIONS,
 };

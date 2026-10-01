@@ -5,7 +5,7 @@ const { pushRaidAssignments } = require("../services/discordWebhookService");
 const raidAssignmentsRouter = Router();
 
 raidAssignmentsRouter.post("/raid-assignments/discord", async (req, res) => {
-  if (!isAdmin({
+  if (!await isAdmin({
     username: req.body?.username,
     globalName: req.body?.globalName,
     discordId: req.body?.discordId,

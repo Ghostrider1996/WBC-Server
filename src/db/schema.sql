@@ -220,6 +220,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS polls_discord_message_id_idx
 CREATE INDEX IF NOT EXISTS polls_created_at_idx
   ON polls (created_at DESC);
 
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open';
+ALTER TABLE polls DROP CONSTRAINT IF EXISTS polls_status_check;
+ALTER TABLE polls ADD CONSTRAINT polls_status_check CHECK (status IN ('open', 'closed'));
+UPDATE polls SET status = 'closed' WHERE ends_at IS NOT NULL AND ends_at <= now() AND status IS DISTINCT FROM 'closed';
+
 CREATE TABLE IF NOT EXISTS poll_options (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   poll_id UUID NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
@@ -253,3 +258,17 @@ DROP TRIGGER IF EXISTS polls_set_updated_at ON polls;
 CREATE TRIGGER polls_set_updated_at
   BEFORE UPDATE ON polls
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS guild_admins (
+  discord_id TEXT PRIMARY KEY,
+  role TEXT NOT NULL DEFAULT 'admin',
+  added_by_discord_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE guild_admins DROP CONSTRAINT IF EXISTS guild_admins_role_check;
+ALTER TABLE guild_admins ADD CONSTRAINT guild_admins_role_check CHECK (role IN ('owner', 'admin'));
+
+INSERT INTO guild_admins (discord_id, role)
+VALUES ('315040446370021378', 'owner')
+ON CONFLICT (discord_id) DO UPDATE SET role = 'owner';

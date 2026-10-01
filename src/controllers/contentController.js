@@ -32,8 +32,8 @@ const imageUpload = multer({
   },
 });
 
-function requireAdmin(req, res) {
-  if (isAdmin({
+async function requireAdmin(req, res) {
+  if (await isAdmin({
     username: req.body?.username,
     globalName: req.body?.globalName,
     discordId: req.body?.discordId,
@@ -139,7 +139,7 @@ function handleImageUpload(req, res, next) {
 }
 
 contentRouter.post("/uploads/image", handleImageUpload, async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 
@@ -197,7 +197,7 @@ contentRouter.get("/news/:id", async (req, res) => {
 });
 
 contentRouter.post("/news", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 
@@ -218,7 +218,7 @@ contentRouter.post("/news", async (req, res) => {
 });
 
 contentRouter.patch("/news/:id", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 
@@ -241,7 +241,7 @@ contentRouter.patch("/news/:id", async (req, res) => {
 });
 
 contentRouter.delete("/news/:id", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 
@@ -283,7 +283,7 @@ contentRouter.get("/gallery/:id", async (req, res) => {
 });
 
 contentRouter.post("/gallery", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 
@@ -301,7 +301,7 @@ contentRouter.post("/gallery", async (req, res) => {
 });
 
 contentRouter.patch("/gallery/:id", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 
@@ -324,7 +324,7 @@ contentRouter.patch("/gallery/:id", async (req, res) => {
 });
 
 contentRouter.delete("/gallery/:id", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 

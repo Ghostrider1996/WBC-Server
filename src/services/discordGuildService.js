@@ -99,7 +99,7 @@ async function canManageRaidEvents(actor = {}) {
     return cached.value;
   }
 
-  const allowed = isAdmin(actor) || await memberHasGmRole(discordId);
+  const allowed = await isAdmin(actor) || await memberHasGmRole(discordId);
   roleCache.set(cacheKey, { value: allowed, expiresAt: Date.now() + ROLE_CACHE_MS });
   return allowed;
 }

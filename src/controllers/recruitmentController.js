@@ -5,8 +5,8 @@ const { listRecruitment, updateRecruitmentStatuses } = require("../services/recr
 
 const recruitmentRouter = Router();
 
-function requireAdmin(req, res) {
-  if (isAdmin({
+async function requireAdmin(req, res) {
+  if (await isAdmin({
     username: req.body?.username,
     globalName: req.body?.globalName,
     discordId: req.body?.discordId,
@@ -47,7 +47,7 @@ recruitmentRouter.get("/recruitment", async (_req, res) => {
 });
 
 recruitmentRouter.patch("/recruitment", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 

@@ -1,13 +1,13 @@
 const { Router } = require("express");
 const { isAdmin } = require("../services/adminService");
 const { findUserByDiscordId } = require("../services/userService");
-const { createPoll, getPollVoters, listPolls, removePollVotes, voteOnPoll } = require("../services/pollService");
+const { createPoll, closePoll, getPollVoters, listPolls, removePollVotes, voteOnPoll } = require("../services/pollService");
 
 const pollRouter = Router();
 const POLL_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function requireAdmin(req, res) {
-  if (isAdmin({
+async function requireAdmin(req, res) {
+  if (await isAdmin({
     username: req.body?.username,
     globalName: req.body?.globalName,
     discordId: req.body?.discordId,
@@ -15,7 +15,7 @@ function requireAdmin(req, res) {
     return true;
   }
 
-  res.status(403).json({ reason: "Only the guild admin can create polls.", status: "failed" });
+  res.status(403).json({ reason: "Only the guild admin can manage polls.", status: "failed" });
   return false;
 }
 
@@ -70,7 +70,7 @@ pollRouter.get("/polls", async (req, res) => {
 });
 
 pollRouter.post("/polls", async (req, res) => {
-  if (!requireAdmin(req, res)) {
+  if (!await requireAdmin(req, res)) {
     return;
   }
 
@@ -86,6 +86,22 @@ pollRouter.post("/polls", async (req, res) => {
     return res.status(201).json(poll);
   } catch (error) {
     return handlePollError(res, error, "The poll could not be created.");
+  }
+});
+
+pollRouter.post("/polls/:id/close", async (req, res) => {
+  if (!await requireAdmin(req, res)) {
+    return;
+  }
+
+  try {
+    const pollId = readPollId(req, res);
+    if (!pollId) return;
+
+    const poll = await closePoll(pollId);
+    return res.status(200).json(poll);
+  } catch (error) {
+    return handlePollError(res, error, "The poll could not be closed.");
   }
 });
 
