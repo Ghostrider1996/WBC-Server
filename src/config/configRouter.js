@@ -8,6 +8,7 @@ const raidAssignmentsRouter = require("../controllers/raidAssignmentsController"
 const recruitmentRouter = require("../controllers/recruitmentController");
 const pollRouter = require("../controllers/pollController");
 const adminRouter = require("../controllers/adminController");
+const wowheadNewsRouter = require("../controllers/wowheadNewsController");
 
 function configRoutes(app) {
   app.use("/api", raidHelperRouter);
@@ -20,6 +21,7 @@ function configRoutes(app) {
   app.use("/api", recruitmentRouter);
   app.use("/api", pollRouter);
   app.use("/api", adminRouter);
+  app.use("/api", wowheadNewsRouter);
 }
 
 module.exports = { configRoutes };
