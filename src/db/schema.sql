@@ -272,3 +272,75 @@ ALTER TABLE guild_admins ADD CONSTRAINT guild_admins_role_check CHECK (role IN (
 INSERT INTO guild_admins (discord_id, role)
 VALUES ('315040446370021378', 'owner')
 ON CONFLICT (discord_id) DO UPDATE SET role = 'owner';
+
+CREATE TABLE IF NOT EXISTS guild_roster_meta (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  roster_updated_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO guild_roster_meta (id)
+VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS guild_roster_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  character_name TEXT NOT NULL,
+  rank_index INTEGER,
+  rank_name TEXT,
+  level INTEGER,
+  class TEXT,
+  public_note TEXT,
+  officer_note TEXT,
+  online BOOLEAN NOT NULL DEFAULT false,
+  last_online_days INTEGER,
+  last_online_at BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS guild_roster_members_name_idx
+  ON guild_roster_members (lower(character_name));
+
+DROP TRIGGER IF EXISTS guild_roster_members_set_updated_at ON guild_roster_members;
+CREATE TRIGGER guild_roster_members_set_updated_at
+  BEFORE UPDATE ON guild_roster_members
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS guild_professions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  character_name TEXT NOT NULL,
+  name TEXT NOT NULL,
+  skill_line_id INTEGER NOT NULL,
+  current_skill INTEGER,
+  max_skill INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS guild_professions_unique
+  ON guild_professions (lower(character_name), skill_line_id);
+
+DROP TRIGGER IF EXISTS guild_professions_set_updated_at ON guild_professions;
+CREATE TRIGGER guild_professions_set_updated_at
+  BEFORE UPDATE ON guild_professions
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS guild_profession_recipes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  character_name TEXT NOT NULL,
+  skill_line_id INTEGER NOT NULL,
+  recipe_id INTEGER NOT NULL,
+  recipe_name TEXT,
+  learned BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS guild_profession_recipes_unique
+  ON guild_profession_recipes (lower(character_name), skill_line_id, recipe_id);
+
+DROP TRIGGER IF EXISTS guild_profession_recipes_set_updated_at ON guild_profession_recipes;
+CREATE TRIGGER guild_profession_recipes_set_updated_at
+  BEFORE UPDATE ON guild_profession_recipes
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
