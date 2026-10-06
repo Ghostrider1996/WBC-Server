@@ -59,6 +59,188 @@ function compact(value) {
   return String(value || "").toLowerCase().replace(/[^a-z]/g, "");
 }
 
+const DISCORD_ATTACHMENT_RE = /^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\/attachments\/(\d+)\/(\d+)\/([^/?#]+)/i;
+const resolvedAttachmentUrls = new Map();
+
+function isBlankImage(value) {
+  if (typeof value !== "string") return true;
+  const trimmed = value.trim();
+  return !trimmed || trimmed.toLowerCase() === "none";
+}
+
+function pickRawEventImage(event) {
+  const candidates = [
+    event?.imageUrl,
+    event?.image,
+    event?.advancedSettings?.image,
+    event?.banner,
+    event?.thumbnail,
+    event?.advancedSettings?.banner,
+    event?.advancedSettings?.thumbnail,
+  ];
+
+  for (const value of candidates) {
+    if (!isBlankImage(value)) return value.trim();
+  }
+
+  return "";
+}
+
+function parseDiscordAttachment(url) {
+  const match = String(url || "").trim().match(DISCORD_ATTACHMENT_RE);
+  if (!match) return null;
+  return {
+    channelId: match[1],
+    attachmentId: match[2],
+    filename: decodeURIComponent(match[3]),
+  };
+}
+
+function imageExtension(filename, contentType) {
+  if (contentType === "image/jpeg") return "jpg";
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/webp") return "webp";
+  if (contentType === "image/gif") return "gif";
+  if (contentType === "image/avif") return "avif";
+
+  const ext = String(filename || "").split(".").pop().toLowerCase();
+  if (ext === "jpeg") return "jpg";
+  if (["jpg", "png", "webp", "gif", "avif"].includes(ext)) return ext;
+  return "jpg";
+}
+
+function attachmentCacheKey(attachmentId, ext) {
+  return `discord/attachments/${attachmentId}.${ext}`;
+}
+
+async function findCachedAttachmentUrl(attachmentId) {
+  const cached = resolvedAttachmentUrls.get(attachmentId);
+  if (cached) return cached;
+
+  try {
+    const { hasObject, publicObjectUrl } = require("./s3Service");
+    for (const ext of ["webp", "jpg", "png", "gif", "avif"]) {
+      const key = attachmentCacheKey(attachmentId, ext);
+      if (await hasObject(key)) {
+        const url = publicObjectUrl(key);
+        resolvedAttachmentUrls.set(attachmentId, url);
+        return url;
+      }
+    }
+  } catch (error) {
+    console.error("Event image cache lookup failed:", error.message);
+  }
+
+  return "";
+}
+
+async function downloadImage(url) {
+  try {
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 15000,
+      headers: {
+        Accept: "image/*,*/*",
+        "User-Agent": "Mozilla/5.0",
+      },
+    });
+    const contentType = String(response.headers["content-type"] || "").split(";")[0].trim();
+    if (!contentType.startsWith("image/")) return null;
+    return { buffer: Buffer.from(response.data), contentType };
+  } catch {
+    return null;
+  }
+}
+
+async function refreshDiscordAttachmentUrl(url) {
+  const token = cleanEnvValue(process.env.DISCORD_BOT_TOKEN);
+  if (!token) return "";
+
+  try {
+    const response = await axios.post(
+      "https://discord.com/api/v10/attachments/refresh-urls",
+      { attachment_urls: [url] },
+      {
+        headers: {
+          Authorization: `Bot ${token}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 10000,
+      },
+    );
+    return String(response.data?.refreshed_urls?.[0]?.refreshed || "").trim();
+  } catch (error) {
+    console.error("Discord attachment URL refresh failed:", error.response?.status || error.message);
+    return "";
+  }
+}
+
+function redditFallbackUrls(filename) {
+  const match = String(filename || "").match(/v0-([a-z0-9]+)\.(?:webp|jpe?g|png|gif)$/i);
+  if (!match) return [];
+  const id = match[1];
+  return [
+    `https://i.redd.it/${id}.jpg`,
+    `https://i.redd.it/${id}.png`,
+    `https://i.redd.it/${id}.webp`,
+  ];
+}
+
+async function storeCachedAttachment(attachmentId, filename, image) {
+  const { putPublicObject } = require("./s3Service");
+  const ext = imageExtension(filename, image.contentType);
+  const url = await putPublicObject(
+    attachmentCacheKey(attachmentId, ext),
+    image.buffer,
+    image.contentType,
+  );
+  resolvedAttachmentUrls.set(attachmentId, url);
+  return url;
+}
+
+async function resolveEventImage(event) {
+  const raw = pickRawEventImage(event);
+  if (!raw) return DEFAULT_RAID_EVENT_IMAGE;
+
+  const attachment = parseDiscordAttachment(raw);
+  if (!attachment) return raw;
+  if (/warcraftforever/i.test(attachment.filename)) return DEFAULT_RAID_EVENT_IMAGE;
+
+  const cached = await findCachedAttachmentUrl(attachment.attachmentId);
+  if (cached) return cached;
+
+  let image = await downloadImage(raw);
+  if (!image) {
+    const refreshed = await refreshDiscordAttachmentUrl(raw);
+    if (refreshed) image = await downloadImage(refreshed);
+  }
+  if (!image) {
+    for (const candidate of redditFallbackUrls(attachment.filename)) {
+      image = await downloadImage(candidate);
+      if (image) break;
+    }
+  }
+  if (!image) return DEFAULT_RAID_EVENT_IMAGE;
+
+  try {
+    return await storeCachedAttachment(attachment.attachmentId, attachment.filename, image);
+  } catch (error) {
+    console.error("Event image could not be cached:", error.message);
+    return DEFAULT_RAID_EVENT_IMAGE;
+  }
+}
+
+async function withResolvedImage(event) {
+  if (!event || typeof event !== "object") return event;
+
+  const image = await resolveEventImage(event);
+  const next = { ...event, image, imageUrl: image };
+  if (event.advancedSettings && typeof event.advancedSettings === "object") {
+    next.advancedSettings = { ...event.advancedSettings, image };
+  }
+  return next;
+}
+
 function specKey(value) {
   return compact(value).replace(/\d+$/, "");
 }
@@ -227,19 +409,21 @@ async function getServerEvents() {
   const detailedEvents = await Promise.all(
     events.map(async (event) => {
       try {
-        const detailResponse = await raidHelperClient.get(`/events/${event.id}`);
+        const detailResponse = await raidHelperClient.get(`/events/${event.id}`, {
+          headers: authHeaders(),
+        });
         const detail = eventFromResponse(detailResponse.data);
 
-        if (!detail || typeof detail !== "object") return event;
+        if (!detail || typeof detail !== "object") return withResolvedImage(event);
 
         const nonEmptyDetail = Object.fromEntries(
           Object.entries(detail).filter(([, value]) => value !== null && value !== undefined && value !== ""),
         );
 
-        return { ...event, ...nonEmptyDetail };
+        return withResolvedImage({ ...event, ...nonEmptyDetail });
       } catch (error) {
         console.error(`Raid Helper event details request failed for ${event.id}:`, error.message);
-        return event;
+        return withResolvedImage(event);
       }
     }),
   );
@@ -255,7 +439,7 @@ async function getEventById(eventId) {
       headers: { Authorization: apiKey },
     });
     const event = eventFromResponse(response.data);
-    if (event && typeof event === "object") return event;
+    if (event && typeof event === "object") return withResolvedImage(event);
   } catch (error) {
     if (error.response?.status !== 404) {
       throw wrapRaidHelperError(error, "The raid event could not be loaded.");
@@ -269,7 +453,7 @@ async function getEventById(eventId) {
     missing.statusCode = 404;
     throw missing;
   }
-  return event;
+  return withResolvedImage(event);
 }
 
 async function sendSignupRequest(method, url, payload) {

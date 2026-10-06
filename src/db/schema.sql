@@ -344,3 +344,9 @@ DROP TRIGGER IF EXISTS guild_profession_recipes_set_updated_at ON guild_professi
 CREATE TRIGGER guild_profession_recipes_set_updated_at
   BEFORE UPDATE ON guild_profession_recipes
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE guild_roster_members ADD COLUMN IF NOT EXISTS last_online_text TEXT;
+ALTER TABLE guild_roster_members ADD COLUMN IF NOT EXISTS last_online_hours INTEGER;
+ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS output_item_id INTEGER;
+ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS icon TEXT;
+ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS materials JSONB;

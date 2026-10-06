@@ -1,5 +1,5 @@
 const { randomUUID } = require("crypto");
-const { GetObjectCommand, S3Client, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { GetObjectCommand, HeadObjectCommand, S3Client, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const ALLOWED_TYPES = {
@@ -59,6 +59,34 @@ function isManagedImageKey(key) {
 function canonicalUrlFor(key) {
   const { region, bucket } = requireS3Config();
   return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+}
+
+function publicObjectUrl(key) {
+  return canonicalUrlFor(key);
+}
+
+async function hasObject(key) {
+  if (!key) return false;
+  try {
+    const { bucket } = requireS3Config();
+    await getClient().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+  } catch (error) {
+    if (error.name === "NotFound" || error.$metadata?.httpStatusCode === 404) return false;
+    throw error;
+  }
+}
+
+async function putPublicObject(key, buffer, contentType) {
+  const { bucket } = requireS3Config();
+  await getClient().send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: contentType,
+    CacheControl: "public, max-age=31536000, immutable",
+  }));
+  return publicObjectUrl(key);
 }
 
 function ownedObjectKey(value) {
@@ -247,7 +275,10 @@ async function deleteOwnedObject(value) {
 module.exports = {
   ALLOWED_TYPES,
   deleteOwnedObject,
+  hasObject,
   normalizeObjectKey,
+  publicObjectUrl,
+  putPublicObject,
   resolveSignedMedia,
   signObjectKeys,
   storedMediaValue,
