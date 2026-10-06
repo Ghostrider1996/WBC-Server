@@ -688,16 +688,14 @@ async function ingestBridgeUpload(payload = {}) {
       await dropProfessions(client, professionDrops);
     }
 
-    const [professionRows, recipeRows] = await Promise.all([
-      client.query(`
-        SELECT character_name, name, skill_line_id
-        FROM guild_professions
-      `),
-      client.query(`
-        SELECT character_name, skill_line_id, recipe_id, recipe_name
-        FROM guild_profession_recipes
-      `),
-    ]);
+    const professionRows = await client.query(`
+      SELECT character_name, name, skill_line_id
+      FROM guild_professions
+    `);
+    const recipeRows = await client.query(`
+      SELECT character_name, skill_line_id, recipe_id, recipe_name
+      FROM guild_profession_recipes
+    `);
     await dropCopiedProfessionRecipes(
       client,
       professionRows.rows,
@@ -866,40 +864,36 @@ function presentProfession(row, recipes) {
 }
 
 async function listGuildRoster() {
-  const client = await getPool().connect();
-  try {
-    const [meta, members, professions, recipes] = await Promise.all([
-      client.query("SELECT roster_updated_at AS \"rosterUpdatedAt\" FROM guild_roster_meta WHERE id = 1"),
-      client.query(`
-        SELECT character_name, rank_index, rank_name, level, class, public_note, online, last_online_days, last_online_hours, last_online_text
-        FROM guild_roster_members
-        ORDER BY rank_index ASC NULLS LAST, lower(character_name) ASC
-      `),
-      client.query(`
-        SELECT character_name, name, skill_line_id, current_skill, max_skill
-        FROM guild_professions
-        ORDER BY lower(character_name) ASC, lower(name) ASC
-      `),
-      client.query(`
-        SELECT character_name, skill_line_id, recipe_id, recipe_name, learned, output_item_id, icon, materials
-        FROM guild_profession_recipes
-        ORDER BY lower(recipe_name) ASC, recipe_id ASC
-      `),
-    ]);
+  const pool = getPool();
+  const [meta, members, professions, recipes] = await Promise.all([
+    pool.query("SELECT roster_updated_at AS \"rosterUpdatedAt\" FROM guild_roster_meta WHERE id = 1"),
+    pool.query(`
+      SELECT character_name, rank_index, rank_name, level, class, public_note, online, last_online_days, last_online_hours, last_online_text
+      FROM guild_roster_members
+      ORDER BY rank_index ASC NULLS LAST, lower(character_name) ASC
+    `),
+    pool.query(`
+      SELECT character_name, name, skill_line_id, current_skill, max_skill
+      FROM guild_professions
+      ORDER BY lower(character_name) ASC, lower(name) ASC
+    `),
+    pool.query(`
+      SELECT character_name, skill_line_id, recipe_id, recipe_name, learned, output_item_id, icon, materials
+      FROM guild_profession_recipes
+      ORDER BY lower(recipe_name) ASC, recipe_id ASC
+    `),
+  ]);
 
-    const recipesByKey = recipesByProfessionKey(recipes.rows);
-    const canonicalByCharacter = canonicalRecipeIdsByCharacter(professions.rows, recipesByKey);
+  const recipesByKey = recipesByProfessionKey(recipes.rows);
+  const canonicalByCharacter = canonicalRecipeIdsByCharacter(professions.rows, recipesByKey);
 
-    return {
-      rosterUpdatedAt: meta.rows[0]?.rosterUpdatedAt || null,
-      members: members.rows.map(presentMember),
-      professions: professions.rows.map((row) => (
-        presentProfession(row, recipesForProfessionRow(row, recipesByKey, canonicalByCharacter))
-      )),
-    };
-  } finally {
-    client.release();
-  }
+  return {
+    rosterUpdatedAt: meta.rows[0]?.rosterUpdatedAt || null,
+    members: members.rows.map(presentMember),
+    professions: professions.rows.map((row) => (
+      presentProfession(row, recipesForProfessionRow(row, recipesByKey, canonicalByCharacter))
+    )),
+  };
 }
 
 module.exports = {
