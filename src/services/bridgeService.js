@@ -705,22 +705,22 @@ async function ingestBridgeUpload(payload = {}) {
 }
 
 function professionGroupName(row) {
-  return String(row?.name || "").trim().toLowerCase();
+  const skillLineId = Number(row?.skill_line_id)
+  if (skillLineId === 186 || skillLineId === 2946) return "mining"
+
+  const name = String(row?.name || "").trim().toLowerCase()
+  if (name === "smelting") return "mining"
+  return name
 }
 
 function recipeLookupKey(characterName, skillLineId) {
   return `${String(characterName || "").toLowerCase()}:${skillLineId}`;
 }
 
-function intersectRecipeIds(sets) {
-  if (sets.length === 0) return new Set();
-
-  const [first, ...rest] = sets;
-  if (rest.length === 0) return new Set(first);
-
+function unionRecipeIds(sets) {
   const kept = new Set();
-  for (const value of first) {
-    if (rest.every((set) => set.has(value))) kept.add(value);
+  for (const set of sets) {
+    for (const value of set) kept.add(value);
   }
   return kept;
 }
@@ -762,7 +762,7 @@ function canonicalRecipeIdsByCharacter(professionRows, recipesByKey) {
         (recipesByKey.get(recipeLookupKey(row.character_name, row.skill_line_id)) || [])
           .map((recipe) => recipe.recipe_id),
       ));
-      canonicalByProfession.set(professionName, intersectRecipeIds(idSets));
+      canonicalByProfession.set(professionName, unionRecipeIds(idSets));
     }
 
     canonicalByCharacter.set(characterKey, canonicalByProfession);
@@ -779,7 +779,6 @@ function belongingProfessionNames(recipeName, professionNames) {
 
   if (isSmelt) return mining.length > 0 ? mining : names;
   if (others.length > 0) return others;
-  if (mining.length > 0) return [];
   return names;
 }
 
