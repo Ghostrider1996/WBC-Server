@@ -1,5 +1,5 @@
 const { randomUUID } = require("crypto");
-const { GetObjectCommand, HeadObjectCommand, S3Client, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const ALLOWED_TYPES = {
@@ -11,6 +11,8 @@ const ALLOWED_TYPES = {
 };
 
 const MANAGED_KEY_PATTERN = /^(news|gallery)\/[A-Za-z0-9._-]+$/;
+const SOUNDTRACK_PREFIX = "soundtracks/";
+const SOUNDTRACK_KEY_PATTERN = /^soundtracks\/[^/]+\.(mp3|ogg|oga|wav|m4a|aac|flac)$/i;
 const DEFAULT_SIGN_TTL_SECONDS = 12 * 60 * 60;
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 const signedUrlCache = new Map();
@@ -63,6 +65,45 @@ function canonicalUrlFor(key) {
 
 function publicObjectUrl(key) {
   return canonicalUrlFor(key);
+}
+
+function soundtrackPublicUrl(key) {
+  const { region, bucket } = requireS3Config();
+  const encoded = String(key).split("/").map(encodeURIComponent).join("/");
+  return `https://${bucket}.s3.${region}.amazonaws.com/${encoded}`;
+}
+
+function soundtrackTitle(key) {
+  const fileName = String(key || "").slice(SOUNDTRACK_PREFIX.length);
+  return fileName.replace(/\.[^.]+$/, "").trim();
+}
+
+async function listSoundtrackTracks() {
+  const { bucket } = requireS3Config();
+  const tracks = [];
+  let continuationToken;
+
+  do {
+    const result = await getClient().send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: SOUNDTRACK_PREFIX,
+      ContinuationToken: continuationToken,
+    }));
+
+    for (const object of result.Contents || []) {
+      if (!object?.Key || !object.Size || !SOUNDTRACK_KEY_PATTERN.test(object.Key)) continue;
+      tracks.push({
+        key: object.Key,
+        title: soundtrackTitle(object.Key),
+        url: soundtrackPublicUrl(object.Key),
+      });
+    }
+
+    continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  tracks.sort((left, right) => left.title.localeCompare(right.title));
+  return tracks;
 }
 
 async function hasObject(key) {
@@ -276,6 +317,7 @@ module.exports = {
   ALLOWED_TYPES,
   deleteOwnedObject,
   hasObject,
+  listSoundtrackTracks,
   normalizeObjectKey,
   publicObjectUrl,
   putPublicObject,
