@@ -108,6 +108,21 @@ function parseTimestamp(value) {
   return null;
 }
 
+const GATHERING_ROSTER_PROFESSIONS = new Set(["herbalism", "skinning"]);
+const PERSONAL_PROFESSIONS = new Set(["fishing", "poisons", "poison", "tanning"]);
+
+function professionLookupName(value) {
+  return asTrimmedString(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function isGatheringRosterProfession(value) {
+  return GATHERING_ROSTER_PROFESSIONS.has(professionLookupName(value));
+}
+
+function isPersonalProfession(value) {
+  return PERSONAL_PROFESSIONS.has(professionLookupName(value));
+}
+
 const PROFESSION_NAME_IDS = {
   alchemy: 171,
   blacksmithing: 164,
@@ -299,6 +314,7 @@ function crafterNames(value) {
 
 function mergeProfessionRow(target, incoming) {
   if (!incoming) return target;
+  const gathering = Boolean(incoming.gathering || target?.gathering);
   if (!target) {
     return {
       characterName: incoming.characterName,
@@ -306,13 +322,21 @@ function mergeProfessionRow(target, incoming) {
       skillLineID: incoming.skillLineID,
       currentSkill: incoming.currentSkill,
       maxSkill: incoming.maxSkill,
-      recipes: [...(incoming.recipes || [])],
+      discordName: incoming.discordName || null,
+      gathering,
+      recipes: gathering ? [] : [...(incoming.recipes || [])],
     };
   }
 
+  target.gathering = gathering;
   if (incoming.currentSkill != null) target.currentSkill = incoming.currentSkill;
   if (incoming.maxSkill != null) target.maxSkill = incoming.maxSkill;
+  if (incoming.discordName) target.discordName = incoming.discordName;
   if (incoming.name) target.name = incoming.name;
+  if (gathering) {
+    target.recipes = [];
+    return target;
+  }
 
   const seen = new Set(target.recipes.map((recipe) => recipe.recipeID));
   for (const recipe of incoming.recipes || []) {
@@ -324,25 +348,71 @@ function mergeProfessionRow(target, incoming) {
   return target;
 }
 
+function discordNameFrom(value) {
+  if (!value || typeof value !== "object") return null;
+  return asTrimmedString(value.discord || value.discordName || value.discordHandle) || null;
+}
+
 function pushProfessionRow(rows, profession) {
   const characterName = asTrimmedString(profession?.characterName);
   const name = asTrimmedString(profession?.name || profession?.professionName || profession?.profession);
   const skillLineID = skillLineIdFromProfession({ ...profession, name });
-  if (!characterName || !name || skillLineID == null) return;
+  if (!characterName || !name || skillLineID == null || isPersonalProfession(name)) return;
 
-  const recipes = objectValues(profession.recipes || profession.patterns)
-    .map((recipe) => normalizeRecipe(recipe, characterName))
-    .filter(Boolean);
+  const gathering = isGatheringRosterProfession(name);
+  const recipes = gathering
+    ? []
+    : objectValues(profession.recipes || profession.patterns)
+      .map((recipe) => normalizeRecipe(recipe, characterName))
+      .filter(Boolean);
 
   const key = `${characterName.toLowerCase()}:${skillLineID}`;
   rows.set(key, mergeProfessionRow(rows.get(key), {
     characterName,
     name,
     skillLineID,
-    currentSkill: asInteger(profession.currentSkill),
+    currentSkill: asInteger(profession.currentSkill ?? profession.skill),
     maxSkill: asInteger(profession.maxSkill),
+    discordName: discordNameFrom(profession),
+    gathering,
     recipes,
   }));
+}
+
+function collectGatheringHolders(rows, entry, name) {
+  const holders = isPlainObject(entry.holders) ? entry.holders : {};
+  const skills = isPlainObject(entry.holderSkills) ? entry.holderSkills : {};
+  const seen = new Set();
+
+  const addHolder = (key, displayName, skill) => {
+    const characterName = asTrimmedString(displayName) || asTrimmedString(holders[key]) || asTrimmedString(key);
+    if (!characterName) return;
+    const id = characterName.toLowerCase();
+    if (seen.has(id)) return;
+    seen.add(id);
+    const record = isPlainObject(skill) ? skill : {};
+    pushProfessionRow(rows, {
+      characterName,
+      name,
+      skillLineID: entry.skillLineID ?? entry.skillLineId,
+      currentSkill: record.skill ?? record.currentSkill,
+      maxSkill: record.maxSkill,
+      discord: record.discord || record.discordName,
+    });
+  };
+
+  for (const [key, skill] of Object.entries(skills)) {
+    addHolder(key, holders[key] || skill?.characterName, skill);
+  }
+  for (const [key, displayName] of Object.entries(holders)) {
+    addHolder(key, displayName, skills[key] || skills[String(key).toLowerCase()]);
+  }
+
+  for (const pattern of objectValues(entry.patterns || entry.recipes)) {
+    for (const crafter of crafterNames(pattern?.crafters)) {
+      addHolder(crafter.toLowerCase(), crafter, skills[crafter.toLowerCase()]);
+    }
+  }
 }
 
 function collectProfessionsFromTree(rows, tree) {
@@ -352,6 +422,11 @@ function collectProfessionsFromTree(rows, tree) {
   for (const [key, entry] of Object.entries(professions)) {
     if (!entry || typeof entry !== "object") continue;
     const name = asTrimmedString(entry.name) || asTrimmedString(key);
+    if (isPersonalProfession(name)) continue;
+    if (isGatheringRosterProfession(name)) {
+      collectGatheringHolders(rows, entry, name);
+      continue;
+    }
     const patterns = objectValues(entry.patterns || entry.recipes);
     const holders = crafterNames(entry.holders);
 
@@ -424,6 +499,13 @@ function collectProfessionsFromProfiles(rows, profiles) {
     const professions = objectValues(profile?.professions);
     for (const profession of professions) {
       pushProfessionRow(rows, { ...profession, characterName: profession?.characterName || characterName });
+    }
+    for (const skill of objectValues(profile?.gathering)) {
+      pushProfessionRow(rows, {
+        ...skill,
+        characterName: skill?.characterName || characterName,
+        discord: skill?.discord || skill?.discordName || profile?.owner?.discordHandle,
+      });
     }
   }
 }
@@ -567,21 +649,32 @@ async function upsertProfessions(client, professions) {
 
     await client.query(
       `INSERT INTO guild_professions (
-        character_name, name, skill_line_id, current_skill, max_skill
-      ) VALUES ($1, $2, $3, $4, $5)
+        character_name, name, skill_line_id, current_skill, max_skill, discord_name
+      ) VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (lower(character_name), skill_line_id) DO UPDATE SET
         character_name = EXCLUDED.character_name,
         name = EXCLUDED.name,
         current_skill = EXCLUDED.current_skill,
-        max_skill = EXCLUDED.max_skill`,
+        max_skill = EXCLUDED.max_skill,
+        discord_name = COALESCE(NULLIF(EXCLUDED.discord_name, ''), guild_professions.discord_name)`,
       [
         characterName,
         name,
         skillLineId,
         asInteger(profession.currentSkill),
         asInteger(profession.maxSkill),
+        asTrimmedString(profession.discordName) || null,
       ],
     );
+
+    if (profession.gathering || isGatheringRosterProfession(name)) {
+      await client.query(
+        `DELETE FROM guild_profession_recipes
+         WHERE lower(character_name) = lower($1) AND skill_line_id = $2`,
+        [characterName, skillLineId],
+      );
+      continue;
+    }
 
     if (!Array.isArray(profession.recipes) || profession.recipes.length === 0) continue;
 
@@ -851,6 +944,7 @@ function presentProfession(row, recipes) {
     skillLineID: row.skill_line_id,
     currentSkill: row.current_skill,
     maxSkill: row.max_skill,
+    discordName: row.discord_name || "",
     recipes: recipes.map((recipe) => ({
       recipeID: recipe.recipe_id,
       recipeName: recipe.recipe_name || "",
@@ -872,7 +966,7 @@ async function listGuildRoster() {
       ORDER BY rank_index ASC NULLS LAST, lower(character_name) ASC
     `),
     pool.query(`
-      SELECT character_name, name, skill_line_id, current_skill, max_skill
+      SELECT character_name, name, skill_line_id, current_skill, max_skill, discord_name
       FROM guild_professions
       ORDER BY lower(character_name) ASC, lower(name) ASC
     `),

@@ -4,6 +4,7 @@ const {
   getDiscordAuthorizationUrl,
 } = require("../services/discordAuthService");
 const { upsertDiscordUser } = require("../services/userService");
+const { resolveChannelNames } = require("../services/discordGuildService");
 const {
   callbackUri,
   decodeOAuthState,
@@ -93,6 +94,17 @@ discordAuthRouter.get("/auth/discord/callback", async (req, res) => {
       discord_error_description: `${discordError} (${status})`,
     });
     return res.redirect(`${origin}${returnTo}#${params.toString()}`);
+  }
+});
+
+discordAuthRouter.get("/discord/channels", async (req, res) => {
+  const ids = String(req.query.ids || "").split(",");
+  try {
+    const channels = await resolveChannelNames(ids);
+    return res.status(200).json({ channels });
+  } catch (error) {
+    console.error("Discord channels could not be loaded.", error.response?.status || error.message);
+    return res.status(200).json({ channels: {} });
   }
 });
 

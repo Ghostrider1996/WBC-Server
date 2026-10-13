@@ -3,8 +3,14 @@ const { query } = require("../db/pool");
 const { isAdmin } = require("./adminService");
 
 const GM_ROLE_NAMES = new Set(["gm", "guild master", "guildmaster"]);
+const KNOWN_DISCORD_CHANNELS = {
+  "1411724073406431403": "announcements",
+};
+
 const roleCache = new Map();
 const ROLE_CACHE_MS = 60 * 1000;
+const CHANNEL_CACHE_MS = 10 * 60 * 1000;
+let guildChannelCache = { expiresAt: 0, byId: null };
 
 function cleanEnvValue(value) {
   if (!value || typeof value !== "string") return "";
@@ -104,4 +110,42 @@ async function canManageRaidEvents(actor = {}) {
   return allowed;
 }
 
-module.exports = { canManageRaidEvents, memberHasGmRole };
+async function loadGuildChannelMap() {
+  if (guildChannelCache.byId && guildChannelCache.expiresAt > Date.now()) {
+    return guildChannelCache.byId;
+  }
+
+  const botToken = getBotToken();
+  const guildId = getGuildId();
+  if (!botToken || !guildId) {
+    guildChannelCache = { expiresAt: Date.now() + 60 * 1000, byId: new Map() };
+    return guildChannelCache.byId;
+  }
+
+  const response = await axios.get(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
+    headers: { Authorization: `Bot ${botToken}` },
+  });
+  const byId = new Map();
+  for (const channel of Array.isArray(response.data) ? response.data : []) {
+    if (channel?.id && channel?.name) byId.set(String(channel.id), channel.name);
+  }
+
+  guildChannelCache = { expiresAt: Date.now() + CHANNEL_CACHE_MS, byId };
+  return byId;
+}
+
+async function resolveChannelNames(ids) {
+  const wanted = [...new Set((ids || []).map((id) => String(id).trim()))]
+    .filter((id) => /^\d{17,20}$/.test(id))
+    .slice(0, 30);
+  if (!wanted.length) return {};
+
+  const byId = await loadGuildChannelMap();
+  return Object.fromEntries(
+    wanted
+      .filter((id) => byId.has(id) || KNOWN_DISCORD_CHANNELS[id])
+      .map((id) => [id, byId.get(id) || KNOWN_DISCORD_CHANNELS[id]]),
+  );
+}
+
+module.exports = { canManageRaidEvents, memberHasGmRole, resolveChannelNames };

@@ -350,3 +350,4 @@ ALTER TABLE guild_roster_members ADD COLUMN IF NOT EXISTS last_online_hours INTE
 ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS output_item_id INTEGER;
 ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS icon TEXT;
 ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS materials JSONB;
+ALTER TABLE guild_professions ADD COLUMN IF NOT EXISTS discord_name TEXT;
