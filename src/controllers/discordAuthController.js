@@ -4,6 +4,7 @@ const {
   getDiscordAuthorizationUrl,
 } = require("../services/discordAuthService");
 const { upsertDiscordUser } = require("../services/userService");
+const { signSessionToken } = require("../services/sessionToken");
 const { resolveChannelNames } = require("../services/discordGuildService");
 const {
   callbackUri,
@@ -20,8 +21,21 @@ function resolveWebOrigin(origin) {
   return sanitizeOrigin(origin) || defaultWebOrigin();
 }
 
+function isLocalUrl(value) {
+  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(value || "");
+}
+
 function resolveRedirectUri(origin) {
-  return callbackUri(resolveWebOrigin(origin), CALLBACK_PATH);
+  const webOrigin = resolveWebOrigin(origin);
+  const configured = (process.env.DISCORD_REDIRECT_URI || "").trim();
+
+  // Local development: use the callback registered with Discord (the server itself),
+  // instead of the Vite address, which Discord has no entry for.
+  if (isLocalUrl(webOrigin) && isLocalUrl(configured)) {
+    return configured;
+  }
+
+  return callbackUri(webOrigin, CALLBACK_PATH);
 }
 
 function sanitizeReturnTo(value) {
@@ -44,6 +58,7 @@ function encodeUser(user) {
     globalName: user.global_name || user.username,
     avatar: user.avatar,
     discriminator: user.discriminator,
+    token: signSessionToken(user.id),
   })).toString("base64url");
 }
 

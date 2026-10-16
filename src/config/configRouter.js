@@ -11,8 +11,10 @@ const adminRouter = require("../controllers/adminController");
 const wowheadNewsRouter = require("../controllers/wowheadNewsController");
 const bridgeRouter = require("../controllers/bridgeController");
 const soundtrackRouter = require("../controllers/soundtrackController");
+const huntRouter = require("../controllers/huntController");
 
 function configRoutes(app) {
+  app.use("/api", huntRouter);
   app.use("/api", raidHelperRouter);
   app.use("/api", discordAuthRouter);
   app.use("/api", blizzardAuthRouter);

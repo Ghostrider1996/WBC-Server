@@ -351,3 +351,58 @@ ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS output_item_id INT
 ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS icon TEXT;
 ALTER TABLE guild_profession_recipes ADD COLUMN IF NOT EXISTS materials JSONB;
 ALTER TABLE guild_professions ADD COLUMN IF NOT EXISTS discord_name TEXT;
+
+CREATE TABLE IF NOT EXISTS hunt_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'live',
+  total_locations INTEGER NOT NULL DEFAULT 5,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at TIMESTAMPTZ
+);
+
+ALTER TABLE hunt_events DROP CONSTRAINT IF EXISTS hunt_events_status_check;
+ALTER TABLE hunt_events ADD CONSTRAINT hunt_events_status_check CHECK (status IN ('live', 'ended'));
+
+CREATE UNIQUE INDEX IF NOT EXISTS hunt_events_one_live_idx
+  ON hunt_events ((status)) WHERE status = 'live';
+
+CREATE TABLE IF NOT EXISTS hunt_participants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id UUID NOT NULL REFERENCES hunt_events(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ready',
+  accumulated_ms BIGINT NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ,
+  locations_found INTEGER NOT NULL DEFAULT 0,
+  final_ms BIGINT,
+  finished_at TIMESTAMPTZ,
+  finish_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE hunt_participants DROP CONSTRAINT IF EXISTS hunt_participants_status_check;
+ALTER TABLE hunt_participants ADD CONSTRAINT hunt_participants_status_check
+  CHECK (status IN ('ready', 'running', 'paused', 'finished'));
+
+ALTER TABLE hunt_participants DROP CONSTRAINT IF EXISTS hunt_participants_reason_check;
+ALTER TABLE hunt_participants ADD CONSTRAINT hunt_participants_reason_check
+  CHECK (finish_reason IS NULL OR finish_reason IN ('all_found', 'stopped'));
+
+ALTER TABLE hunt_participants DROP CONSTRAINT IF EXISTS hunt_participants_found_check;
+ALTER TABLE hunt_participants ADD CONSTRAINT hunt_participants_found_check
+  CHECK (locations_found >= 0 AND locations_found <= 100);
+
+CREATE INDEX IF NOT EXISTS hunt_participants_event_idx
+  ON hunt_participants (event_id, created_at);
+
+CREATE TABLE IF NOT EXISTS hunt_findings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_id UUID NOT NULL REFERENCES hunt_participants(id) ON DELETE CASCADE,
+  elapsed_ms BIGINT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS hunt_findings_participant_idx
+  ON hunt_findings (participant_id, created_at);
