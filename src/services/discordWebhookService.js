@@ -30,6 +30,44 @@ const linkLabels = {
   warcraftLogsLink: ":link: My Logs",
 };
 
+const ASSET_BASE_URL = "https://wbchq-assets.s3.us-east-1.amazonaws.com/discord";
+
+// Same class colors the website uses (WBC_Wrbpage/src/services/wowIcons.js).
+const CLASS_COLORS = {
+  warrior: "#C79C6E",
+  paladin: "#F58CBA",
+  hunter: "#ABD473",
+  rogue: "#FFF569",
+  // Discord ignores a pure #FFFFFF embed color and shows the default dark border, so use the nearest white.
+  priest: "#FFFFFE",
+  shaman: "#0070DE",
+  mage: "#69CCF0",
+  warlock: "#9482C9",
+  druid: "#FF7D0A",
+};
+
+// The form sends the class with its emoji in front, e.g. "<:hunter:123> Hunter".
+function detectClassKey(value) {
+  const text = String(value || "")
+    .replace(/<a?:\w+:\d+>/g, " ")
+    .replace(/:\w+:/g, " ")
+    .toLowerCase();
+
+  return Object.keys(CLASS_COLORS).find((key) => new RegExp(`\\b${key}\\b`).test(text)) || "";
+}
+
+function getClassPresentation(applicationType, fields) {
+  if (applicationType !== "guild" && applicationType !== "verification") return null;
+
+  const classKey = detectClassKey(fields?.className);
+  if (!classKey) return null;
+
+  return {
+    banner: `${ASSET_BASE_URL}/${classKey}_banner.jpg`,
+    color: parseInt(CLASS_COLORS[classKey].slice(1), 16),
+  };
+}
+
 const privateVerificationFields = new Set(["account", "discordAccount", "discordTag", "discordUsername"]);
 
 function getWebhookUrl(applicationType) {
@@ -135,16 +173,19 @@ async function submitApplication(applicationType, fields, applicantPayload) {
   const LOGO_URL = "https://i.postimg.cc/2y7YQNLt/WBC-Logo.png";
   const DEFAULT_BANNER = "https://i.postimg.cc/PfQnFhPs/file-000000007bf882468e45a7f7dd58c06d.png";
 
+  // Guild and verification forms get the character's class banner and color instead of the guild banner.
+  const classLook = getClassPresentation(applicationType, fields);
+
   try {
     await axios.post(webhookUrl, {
       embeds: [{
         title: label,
-        color: 255,
+        color: classLook?.color ?? 255,
         author: getApplicantAuthor(applicant),
         fields: submittedFields,
         footer: { text: "Submitted from WBC Web Client" },
         thumbnail: { url: LOGO_URL },
-        image: { url: DEFAULT_BANNER },
+        image: { url: classLook?.banner ?? DEFAULT_BANNER },
         timestamp: new Date().toISOString(),
       }],
     });

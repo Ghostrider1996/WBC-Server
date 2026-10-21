@@ -43,6 +43,7 @@ function handle(work, successStatus = 200) {
 
 huntRouter.get("/hunt/live", handle(() => hunt.getSnapshot()));
 huntRouter.get("/hunt/stream", (req, res) => hunt.openStream(req, res));
+huntRouter.get("/hunt/past", handle(() => hunt.listPastEvents()));
 
 huntRouter.post("/hunt/participants", requireOwner, handle((req) => hunt.addParticipant(req.body?.name), 201));
 huntRouter.post("/hunt/participants/:id/start", requireOwner, handle((req) => hunt.startParticipant(req.params.id)));
@@ -55,6 +56,7 @@ huntRouter.post(
   handle((req) => hunt.changeLocations(req.params.id, Number(req.body?.delta))),
 );
 huntRouter.delete("/hunt/participants/:id", requireOwner, handle((req) => hunt.deleteParticipant(req.params.id)));
-huntRouter.post("/hunt/events", requireOwner, handle((req) => hunt.startNewEvent(req.body?.name), 201));
+huntRouter.post("/hunt/events", requireOwner, handle((req) => hunt.createEvent(req.body?.name), 201));
+huntRouter.post("/hunt/events/conclude", requireOwner, handle(() => hunt.concludeEvent()));
 
 module.exports = huntRouter;

@@ -1,7 +1,7 @@
 const { getPool, query } = require("../db/pool");
 
-const DEFAULT_EVENT_NAME = "The Great Beta Scavenger Hunt";
 const MAX_NAME_LENGTH = 40;
+const MAX_EVENT_NAME_LENGTH = 80;
 const MAX_STREAM_CLIENTS = 1000;
 const HEARTBEAT_MS = 25000;
 
@@ -115,22 +115,15 @@ async function openStream(req, res) {
 
 async function getLiveEventRow(db = { query }) {
   const existing = await db.query("SELECT * FROM hunt_events WHERE status = 'live' LIMIT 1");
-  if (existing.rowCount > 0) return existing.rows[0];
-
-  const created = await db.query(
-    `INSERT INTO hunt_events (name) VALUES ($1)
-     ON CONFLICT DO NOTHING
-     RETURNING *`,
-    [DEFAULT_EVENT_NAME],
-  );
-  if (created.rowCount > 0) return created.rows[0];
-
-  const retry = await db.query("SELECT * FROM hunt_events WHERE status = 'live' LIMIT 1");
-  return retry.rows[0];
+  return existing.rows[0] || null;
 }
 
 async function getSnapshot() {
   const event = await getLiveEventRow();
+  if (!event) {
+    return { serverTime: Date.now(), event: null, participants: [] };
+  }
+
   const participants = await query(
     "SELECT * FROM hunt_participants WHERE event_id = $1 ORDER BY created_at ASC",
     [event.id],
@@ -140,6 +133,29 @@ async function getSnapshot() {
     serverTime: Date.now(),
     event: presentEvent(event),
     participants: participants.rows.map(presentParticipant),
+  };
+}
+
+async function listPastEvents() {
+  const events = await query(
+    "SELECT * FROM hunt_events WHERE status = 'ended' ORDER BY ended_at DESC NULLS LAST, started_at DESC",
+  );
+  const ids = events.rows.map((row) => row.id);
+  const participants = ids.length === 0
+    ? { rows: [] }
+    : await query(
+      "SELECT * FROM hunt_participants WHERE event_id = ANY($1::uuid[]) ORDER BY created_at ASC",
+      [ids],
+    );
+
+  return {
+    serverTime: Date.now(),
+    events: events.rows.map((row) => ({
+      event: presentEvent(row),
+      participants: participants.rows
+        .filter((participant) => participant.event_id === row.id)
+        .map(presentParticipant),
+    })),
   };
 }
 
@@ -198,6 +214,7 @@ function cleanName(value) {
 async function addParticipant(rawName) {
   const name = cleanName(rawName);
   const event = await getLiveEventRow();
+  if (!event) throw fail("There is no active hunt event. Create one first.", 409);
 
   const duplicate = await query(
     "SELECT 1 FROM hunt_participants WHERE event_id = $1 AND lower(name) = lower($2) LIMIT 1",
@@ -343,15 +360,59 @@ async function deleteParticipant(id) {
   return { id };
 }
 
-async function startNewEvent(rawName) {
-  const name = typeof rawName === "string" && rawName.trim() ? rawName.trim().slice(0, 80) : DEFAULT_EVENT_NAME;
+async function createEvent(rawName) {
+  const name = typeof rawName === "string" ? rawName.replace(/\s+/g, " ").trim() : "";
+  if (!name) throw fail("An event name is required.", 400);
+  if (name.length > MAX_EVENT_NAME_LENGTH) {
+    throw fail(`Event names can be up to ${MAX_EVENT_NAME_LENGTH} characters.`, 400);
+  }
+
+  try {
+    await query("INSERT INTO hunt_events (name) VALUES ($1)", [name]);
+  } catch (error) {
+    if (error.code === "23505") {
+      throw fail("A hunt event is already running. Conclude it before creating a new one.", 409);
+    }
+    throw error;
+  }
+
+  const snapshot = await getSnapshot();
+  broadcast("snapshot", snapshot);
+  return snapshot;
+}
+
+async function concludeEvent() {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    await client.query(
-      `UPDATE hunt_events SET status = 'ended', ended_at = now() WHERE status = 'live'`,
+    const live = await client.query("SELECT * FROM hunt_events WHERE status = 'live' FOR UPDATE");
+    if (live.rowCount === 0) throw fail("There is no active hunt event to conclude.", 409);
+
+    const event = live.rows[0];
+    const now = Date.now();
+    const unfinished = await client.query(
+      `SELECT * FROM hunt_participants
+        WHERE event_id = $1 AND status IN ('running', 'paused')
+        FOR UPDATE`,
+      [event.id],
     );
-    await client.query("INSERT INTO hunt_events (name) VALUES ($1)", [name]);
+
+    // Anyone still on the clock is stopped where they are, so the results are final.
+    for (const row of unfinished.rows) {
+      const total = elapsedMs(row, now);
+      await client.query(
+        `UPDATE hunt_participants
+            SET status = 'finished', accumulated_ms = $2, started_at = NULL,
+                final_ms = $2, finished_at = $3, finish_reason = 'stopped'
+          WHERE id = $1`,
+        [row.id, total, new Date(now)],
+      );
+    }
+
+    await client.query(
+      "UPDATE hunt_events SET status = 'ended', ended_at = $2 WHERE id = $1",
+      [event.id, new Date(now)],
+    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -368,12 +429,14 @@ async function startNewEvent(rawName) {
 module.exports = {
   addParticipant,
   changeLocations,
+  concludeEvent,
+  createEvent,
   deleteParticipant,
   getSnapshot,
+  listPastEvents,
   openStream,
   pauseParticipant,
   resetParticipant,
-  startNewEvent,
   startParticipant,
   stopParticipant,
 };
