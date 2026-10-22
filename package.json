@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node ./src/index.js",
     "dev": "nodemon ./src/index.js",
-    "db:migrate": "node ./src/db/migrate.js"
+    "db:migrate": "node ./src/db/migrate.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1131.0",

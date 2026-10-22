@@ -1,6 +1,7 @@
 const { randomUUID } = require("crypto");
-const { GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { CopyObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client, DeleteObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { TRIVIA_MEDIA_TYPES, isTriviaKey } = require("./triviaMedia");
 
 const ALLOWED_TYPES = {
   "image/jpeg": "jpg",
@@ -211,6 +212,10 @@ async function getSignedReadUrl(key, { force = false } = {}) {
     throw Object.assign(new Error("A valid image key is required."), { statusCode: 400 });
   }
 
+  return signKey(normalizedKey, force);
+}
+
+async function signKey(normalizedKey, force) {
   const now = Date.now();
   const cached = signedUrlCache.get(normalizedKey);
   if (!force && cached && cached.expiresAt - REFRESH_SKEW_MS > now) {
@@ -313,9 +318,89 @@ async function deleteOwnedObject(value) {
   }
 }
 
+async function getTriviaSignedUrl(key, { force = false } = {}) {
+  if (!isTriviaKey(key)) {
+    throw Object.assign(new Error("A valid trivia media key is required."), { statusCode: 400 });
+  }
+  const signed = await signKey(key, force);
+  return { url: signed.url, expiresAt: new Date(signed.expiresAt).toISOString() };
+}
+
+async function uploadTriviaMedia({ kind, buffer, mimeType }) {
+  const extension = TRIVIA_MEDIA_TYPES[kind]?.[mimeType];
+  if (!extension) {
+    throw Object.assign(new Error("That file type is not allowed."), { statusCode: 415 });
+  }
+
+  const { bucket } = requireS3Config();
+  const key = `trivia/${randomUUID()}.${extension}`;
+
+  await getClient().send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: mimeType,
+    CacheControl: "private, max-age=3600",
+  }));
+
+  invalidateSignedUrl(key);
+  const signed = await getTriviaSignedUrl(key, { force: true });
+  return { key, mimeType, size: buffer.length, url: signed.url, expiresAt: signed.expiresAt };
+}
+
+async function headTriviaObject(key) {
+  if (!isTriviaKey(key)) return null;
+  const { bucket } = requireS3Config();
+  try {
+    const result = await getClient().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return { contentType: String(result.ContentType || ""), size: Number(result.ContentLength) || 0 };
+  } catch (error) {
+    if (error.name === "NotFound" || error.$metadata?.httpStatusCode === 404) return null;
+    throw error;
+  }
+}
+
+async function deleteTriviaObject(key) {
+  if (!isTriviaKey(key)) return;
+  const { bucket } = requireS3Config();
+  invalidateSignedUrl(key);
+  await getClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+async function copyTriviaObject(sourceKey) {
+  if (!isTriviaKey(sourceKey)) {
+    throw Object.assign(new Error("A valid trivia media key is required."), { statusCode: 400 });
+  }
+
+  const { bucket } = requireS3Config();
+  const extension = sourceKey.includes(".") ? sourceKey.slice(sourceKey.lastIndexOf(".") + 1) : "";
+  const targetKey = `trivia/${randomUUID()}${/^[A-Za-z0-9]{1,8}$/.test(extension) ? `.${extension}` : ""}`;
+
+  try {
+    await getClient().send(new CopyObjectCommand({
+      Bucket: bucket,
+      Key: targetKey,
+      CopySource: `${bucket}/${sourceKey.split("/").map(encodeURIComponent).join("/")}`,
+      MetadataDirective: "COPY",
+    }));
+  } catch (error) {
+    if (error.name === "NoSuchKey" || error.name === "NotFound" || error.$metadata?.httpStatusCode === 404) {
+      throw Object.assign(new Error("The media file for this question is missing."), { statusCode: 409 });
+    }
+    throw error;
+  }
+
+  return targetKey;
+}
+
 module.exports = {
   ALLOWED_TYPES,
+  copyTriviaObject,
   deleteOwnedObject,
+  deleteTriviaObject,
+  getTriviaSignedUrl,
+  headTriviaObject,
+  uploadTriviaMedia,
   hasObject,
   listSoundtrackTracks,
   normalizeObjectKey,
