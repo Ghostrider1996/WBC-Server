@@ -12,9 +12,12 @@ const wowheadNewsRouter = require("../controllers/wowheadNewsController");
 const bridgeRouter = require("../controllers/bridgeController");
 const soundtrackRouter = require("../controllers/soundtrackController");
 const huntRouter = require("../controllers/huntController");
+const triviaRouter = require("../controllers/triviaController");
+const { triviaErrorHandler } = triviaRouter;
 
 function configRoutes(app) {
   app.use("/api", huntRouter);
+  app.use("/api", triviaRouter);
   app.use("/api", raidHelperRouter);
   app.use("/api", discordAuthRouter);
   app.use("/api", blizzardAuthRouter);
@@ -28,6 +31,7 @@ function configRoutes(app) {
   app.use("/api", wowheadNewsRouter);
   app.use("/api", bridgeRouter);
   app.use("/api", soundtrackRouter);
+  app.use("/api/trivia", triviaErrorHandler);
 }
 
 module.exports = { configRoutes };
