@@ -406,3 +406,47 @@ CREATE TABLE IF NOT EXISTS hunt_findings (
 
 CREATE INDEX IF NOT EXISTS hunt_findings_participant_idx
   ON hunt_findings (participant_id, created_at);
+
+CREATE TABLE IF NOT EXISTS trivia_admins (
+  discord_id TEXT PRIMARY KEY,
+  added_by_discord_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS trivia_questions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  type TEXT NOT NULL CHECK (type IN ('true_false','single_choice','multi_select','number','sort','image','audio','video')),
+  prompt TEXT NOT NULL,
+  explanation TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL,
+  tags TEXT[] NOT NULL DEFAULT '{}',
+  difficulty TEXT NOT NULL DEFAULT 'medium' CHECK (difficulty IN ('easy','medium','hard')),
+  time_limit_seconds INTEGER NOT NULL DEFAULT 20 CHECK (time_limit_seconds BETWEEN 5 AND 300),
+  points INTEGER NOT NULL DEFAULT 1000 CHECK (points BETWEEN 0 AND 10000),
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','ready','archived')),
+  media JSONB,
+  answer JSONB NOT NULL,
+  created_by_discord_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS trivia_questions_created_at_idx
+  ON trivia_questions (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS trivia_questions_type_idx
+  ON trivia_questions (type);
+
+CREATE INDEX IF NOT EXISTS trivia_questions_category_idx
+  ON trivia_questions (category);
+
+CREATE INDEX IF NOT EXISTS trivia_questions_status_idx
+  ON trivia_questions (status);
+
+CREATE INDEX IF NOT EXISTS trivia_questions_tags_idx
+  ON trivia_questions USING GIN (tags);
+
+DROP TRIGGER IF EXISTS trivia_questions_set_updated_at ON trivia_questions;
+CREATE TRIGGER trivia_questions_set_updated_at
+  BEFORE UPDATE ON trivia_questions
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
