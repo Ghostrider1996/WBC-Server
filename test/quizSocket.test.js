@@ -43,7 +43,7 @@ function createStore() {
         raidHelperEventId: "event-1",
         hostDiscordId: HOST,
         status: "lobby",
-        rounds: [{ category: "Guild", count: 1 }],
+        rounds: [{ type: "single_choice", count: 1 }],
         settings: { introMs: 40, graceMs: 40, revealMs: 5000, leaderboardMs: 5000, autoAdvance: false, endWhenAllAnswered: true },
       }
       : null),
@@ -195,6 +195,8 @@ test("hosts can join without signing up; players cannot control the game or open
     const joined = await host.emit("quiz:join", { sessionId: SESSION_ID, mode: "screen" });
     assert.equal(joined.ok, true);
     assert.equal(joined.role, "host");
+    assert.equal(joined.you.joined, false);
+    assert.equal(joined.state.players.length, 0);
 
     const alice = harness.client(ALICE);
     await alice.opened();
@@ -214,12 +216,13 @@ test("a full quiz: lobby, live question, private answers, reveal, finish and sav
     const bob = harness.client(BOB);
     await Promise.all([host.opened(), alice.opened(), bob.opened()]);
 
-    await host.emit("quiz:join", { sessionId: SESSION_ID });
+    const hostJoin = await host.emit("quiz:join", { sessionId: SESSION_ID });
+    assert.equal(hostJoin.you.joined, true);
     await alice.emit("quiz:join", { sessionId: SESSION_ID });
     await bob.emit("quiz:join", { sessionId: SESSION_ID });
 
-    const lobby = await host.waitFor((payload) => payload.state.players.length === 2, "both players in the lobby");
-    assert.deepEqual(lobby.state.players.map((player) => player.name).sort(), ["Alice", "Bob"]);
+    const lobby = await host.waitFor((payload) => payload.state.players.length === 3, "everyone in the lobby");
+    assert.deepEqual(lobby.state.players.map((player) => player.name).sort(), ["Alice", "Bob", "Host"]);
 
     assert.equal((await host.emit("quiz:host", { action: "start" })).ok, true);
     assert.equal(harness.store.calls.started.length, 1);
@@ -233,7 +236,7 @@ test("a full quiz: lobby, live question, private answers, reveal, finish and sav
     assert.equal(first.ok, true);
     assert.equal(first.you.response, 0);
     assert.equal((await alice.emit("quiz:answer", { response: 1 })).code, "already_answered");
-    assert.equal((await host.emit("quiz:answer", { response: 0 })).code, "not_playing");
+    assert.equal((await host.emit("quiz:answer", { response: 0 })).ok, true);
 
     await bob.emit("quiz:answer", { response: 1 });
 
@@ -246,7 +249,7 @@ test("a full quiz: lobby, live question, private answers, reveal, finish and sav
     assert.equal(aliceReveal.you.response, undefined);
 
     assert.equal(harness.store.calls.locked.length, 1);
-    assert.equal(harness.store.calls.locked[0][1].results.length, 2);
+    assert.equal(harness.store.calls.locked[0][1].results.length, 3);
 
     assert.equal((await host.emit("quiz:host", { action: "next" })).ok, true);
     const done = await bob.waitFor((payload) => payload.state.phase === "finished", "the final screen");
@@ -294,6 +297,7 @@ test("kicking a player removes them and blocks them from coming back", async () 
 
     const again = await alice.emit("quiz:join", { sessionId: SESSION_ID });
     assert.equal(again.code, "removed");
+    assert.equal((await host.emit("quiz:host", { action: "kick", discordId: HOST })).code, "invalid");
   } finally {
     await harness.stop();
   }

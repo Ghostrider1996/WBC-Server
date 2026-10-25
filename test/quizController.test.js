@@ -19,7 +19,7 @@ function session(status = "lobby") {
     hostDiscordId: HOST,
     hostName: "Host",
     status,
-    rounds: [{ category: "Guild", count: 2 }],
+    rounds: [{ type: "single_choice", count: 2 }],
     settings: {},
     createdAt: "2026-10-25T00:00:00.000Z",
     startedAt: null,
@@ -31,7 +31,7 @@ function createHarness({ getEvent, cancelQuiz } = {}) {
   const calls = [];
   const store = {
     listOpenSessions: async () => [session("live")],
-    readyCategoryCounts: async () => [{ name: "Guild", count: 6 }],
+    readyTypeCounts: async () => [{ type: "single_choice", label: "One option", count: 6 }],
     createSession: async (input) => {
       calls.push(["create", input]);
       return session();
@@ -90,25 +90,25 @@ async function call(harness, method, path, { as, body } = {}) {
 test("every quiz route needs a Discord session", async () => {
   const harness = await createHarness();
   try {
-    assert.equal((await call(harness, "GET", "/quiz/sessions/active")).status, 401);
+    assert.equal((await call(harness, "GET", "/quiz/sessions/active")).status, 200);
     assert.equal((await call(harness, "POST", "/quiz/sessions", { body: {} })).status, 401);
   } finally {
     await harness.close();
   }
 });
 
-test("only hosts can see categories or create a quiz", async () => {
+test("only hosts can see types or create a quiz", async () => {
   const harness = await createHarness();
   try {
-    assert.equal((await call(harness, "GET", "/quiz/categories", { as: OTHER })).status, 403);
+    assert.equal((await call(harness, "GET", "/quiz/types", { as: OTHER })).status, 403);
     assert.equal((await call(harness, "POST", "/quiz/sessions", {
       as: OTHER,
-      body: { raidHelperEventId: "event-1", rounds: [{ category: "Guild", count: 1 }] },
+      body: { raidHelperEventId: "event-1", rounds: [{ type: "single_choice", count: 1 }] },
     })).status, 403);
 
-    const categories = await call(harness, "GET", "/quiz/categories", { as: HOST });
-    assert.equal(categories.status, 200);
-    assert.deepEqual(categories.body.categories, [{ name: "Guild", count: 6 }]);
+    const types = await call(harness, "GET", "/quiz/types", { as: HOST });
+    assert.equal(types.status, 200);
+    assert.deepEqual(types.body.types, [{ type: "single_choice", label: "One option", count: 6 }]);
   } finally {
     await harness.close();
   }
@@ -117,24 +117,24 @@ test("only hosts can see categories or create a quiz", async () => {
 test("creating a quiz needs a real event and valid rounds", async () => {
   const harness = await createHarness();
   try {
-    const missing = await call(harness, "POST", "/quiz/sessions", { as: HOST, body: { rounds: [{ category: "Guild", count: 1 }] } });
+    const missing = await call(harness, "POST", "/quiz/sessions", { as: HOST, body: { rounds: [{ type: "single_choice", count: 1 }] } });
     assert.equal(missing.status, 400);
     assert.equal(missing.body.fields.raidHelperEventId, "Choose the event this quiz is for.");
 
     const unknown = await call(harness, "POST", "/quiz/sessions", {
       as: HOST,
-      body: { raidHelperEventId: "nope", rounds: [{ category: "Guild", count: 1 }] },
+      body: { raidHelperEventId: "nope", rounds: [{ type: "single_choice", count: 1 }] },
     });
     assert.equal(unknown.status, 404);
 
     const created = await call(harness, "POST", "/quiz/sessions", {
       as: HOST,
-      body: { raidHelperEventId: "event-1", title: "  Night  ", rounds: [{ category: "Guild", count: 2 }] },
+      body: { raidHelperEventId: "event-1", title: "  Night  ", rounds: [{ type: "single_choice", count: 2 }] },
     });
     assert.equal(created.status, 201);
     assert.equal(created.body.session.id, SESSION_ID);
     assert.equal(harness.calls[0][1].title, "Night");
-    assert.deepEqual(harness.calls[0][1].rounds, [{ category: "Guild", count: 2 }]);
+    assert.deepEqual(harness.calls[0][1].rounds, [{ type: "single_choice", count: 2 }]);
   } finally {
     await harness.close();
   }
@@ -147,7 +147,7 @@ test("a down Raid Helper lookup fails closed when creating a quiz", async () => 
   try {
     const result = await call(harness, "POST", "/quiz/sessions", {
       as: HOST,
-      body: { raidHelperEventId: "event-1", rounds: [{ category: "Guild", count: 1 }] },
+      body: { raidHelperEventId: "event-1", rounds: [{ type: "single_choice", count: 1 }] },
     });
     assert.equal(result.status, 502);
   } finally {

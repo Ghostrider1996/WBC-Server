@@ -77,22 +77,22 @@ function createQuizRouter(deps = {}) {
     };
   }
 
-  router.use("/quiz", requireSession);
-
   router.param("id", (req, res, next, id) => {
     if (!UUID_PATTERN.test(id)) return sendFailure(res, 404, "Quiz not found.");
     return next();
   });
 
-  // Open quizzes, so event cards can show a "Join quiz" button.
+  // Public so Home / Raids cards can show Join without a session. Joining the room still requires Discord.
   router.get("/quiz/sessions/active", handle(async () => {
     const sessions = await store.listOpenSessions();
     return { sessions: sessions.map(publicSession) };
   }));
 
-  // What a host can build rounds from: categories with ready questions.
-  router.get("/quiz/categories", requireHost, handle(async () => ({
-    categories: await store.readyCategoryCounts(),
+  router.use("/quiz", requireSession);
+
+  // What a host can build rounds from: types with ready questions.
+  router.get("/quiz/types", requireHost, handle(async () => ({
+    types: await store.readyTypeCounts(),
   })));
 
   router.post("/quiz/sessions", requireHost, handle(async (req) => {
@@ -106,8 +106,8 @@ function createQuizRouter(deps = {}) {
     }
 
     const event = await getEvent(eventId);
-    const categories = await store.readyCategoryCounts();
-    const available = new Map(categories.map((category) => [category.name, category.count]));
+    const types = await store.readyTypeCounts();
+    const available = new Map(types.map((item) => [item.type, item.count]));
 
     const session = await store.createSession({
       title: normalizeTitle(body.title, event?.title ?? event?.name),

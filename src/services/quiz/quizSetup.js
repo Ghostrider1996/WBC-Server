@@ -1,8 +1,25 @@
 /** Validation for the pieces a host chooses when creating a quiz night. Pure, no I/O. */
 
+const { QUESTION_TYPES } = require("../triviaValidation");
+
 const MAX_ROUNDS = 20;
 const MAX_PER_ROUND = 50;
 const TITLE_MAX = 80;
+
+const TYPE_LABELS = {
+  true_false: "True / False",
+  single_choice: "One option",
+  multi_select: "Multi select",
+  number: "Number guess",
+  sort: "Sort",
+  image: "Image",
+  audio: "Audio",
+  video: "Video",
+};
+
+function typeLabel(type) {
+  return TYPE_LABELS[type] || type;
+}
 
 class QuizSetupError extends Error {
   constructor(message, fields) {
@@ -19,8 +36,8 @@ function clampInt(value, min, max, fallback) {
 }
 
 /**
- * Turns the host's chosen rounds into `[{ category, count }]`.
- * `available` maps category name -> number of ready questions.
+ * Turns the host's chosen rounds into `[{ type, count }]`.
+ * `available` maps question type -> number of ready questions.
  */
 function normalizeRounds(raw, available) {
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -33,25 +50,27 @@ function normalizeRounds(raw, available) {
   const fields = {};
   const seen = new Set();
   const rounds = raw.map((round, index) => {
-    const category = typeof round?.category === "string" ? round.category.trim() : "";
+    const type = typeof round?.type === "string" ? round.type.trim() : "";
     const count = Number(round?.count);
 
-    if (!category) {
-      fields[`rounds[${index}].category`] = "Pick a category.";
-    } else if (seen.has(category.toLowerCase())) {
-      fields[`rounds[${index}].category`] = "Each category can only be used once.";
-    } else if (!available.has(category)) {
-      fields[`rounds[${index}].category`] = "That category has no ready questions.";
+    if (!type) {
+      fields[`rounds[${index}].type`] = "Pick a question type.";
+    } else if (!QUESTION_TYPES.includes(type)) {
+      fields[`rounds[${index}].type`] = "That is not a question type.";
+    } else if (seen.has(type)) {
+      fields[`rounds[${index}].type`] = "Each type can only be used once.";
+    } else if (!available.has(type)) {
+      fields[`rounds[${index}].type`] = "That type has no ready questions.";
     }
-    seen.add(category.toLowerCase());
+    if (type) seen.add(type);
 
     if (!Number.isInteger(count) || count < 1 || count > MAX_PER_ROUND) {
       fields[`rounds[${index}].count`] = `Choose 1 to ${MAX_PER_ROUND} questions.`;
-    } else if (available.has(category) && count > available.get(category)) {
-      fields[`rounds[${index}].count`] = `Only ${available.get(category)} ready question(s) in this category.`;
+    } else if (available.has(type) && count > available.get(type)) {
+      fields[`rounds[${index}].count`] = `Only ${available.get(type)} ready question(s) of this type.`;
     }
 
-    return { category, count };
+    return { type, count };
   });
 
   if (Object.keys(fields).length > 0) {
@@ -78,4 +97,4 @@ function normalizeTitle(raw, fallback) {
   return chosen.slice(0, TITLE_MAX);
 }
 
-module.exports = { QuizSetupError, normalizeRounds, normalizeSettings, normalizeTitle };
+module.exports = { QuizSetupError, TYPE_LABELS, normalizeRounds, normalizeSettings, normalizeTitle, typeLabel };

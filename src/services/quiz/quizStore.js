@@ -1,6 +1,8 @@
 const { query } = require("../../db/pool");
 const triviaService = require("../triviaService");
 const { shuffled } = require("./quizScoring");
+const { QUESTION_TYPES } = require("../triviaValidation");
+const { typeLabel } = require("./quizSetup");
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -38,16 +40,18 @@ const SESSION_SELECT = `
   LEFT JOIN users u ON u.discord_id = s.host_discord_id
 `;
 
-/** Number of ready questions per category: what a host can build rounds from. */
-async function readyCategoryCounts() {
+/** Number of ready questions per type: what a host can build rounds from. */
+async function readyTypeCounts() {
   const result = await query(
-    `SELECT category AS name, count(*)::int AS count
+    `SELECT type, count(*)::int AS count
      FROM trivia_questions
      WHERE status = 'ready'
-     GROUP BY category
-     ORDER BY lower(category), category`,
+     GROUP BY type`,
   );
-  return result.rows;
+  const byType = new Map(result.rows.map((row) => [row.type, row.count]));
+  return QUESTION_TYPES
+    .filter((type) => byType.has(type))
+    .map((type) => ({ type, label: typeLabel(type), count: byType.get(type) }));
 }
 
 async function createSession({ title, raidHelperEventId, hostDiscordId, rounds, settings }) {
@@ -80,7 +84,7 @@ async function listOpenSessions() {
 }
 
 /**
- * Draws each round's questions at random from the ready ones in its category.
+ * Draws each round's questions at random from the ready ones of its type.
  * Media links are signed now, when the quiz starts, so they outlive the night.
  */
 async function pickQuestions(rounds, random = Math.random) {
@@ -89,17 +93,17 @@ async function pickQuestions(rounds, random = Math.random) {
   for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
     const round = rounds[roundIndex];
     const result = await query(
-      "SELECT * FROM trivia_questions WHERE status = 'ready' AND category = $1",
-      [round.category],
+      "SELECT * FROM trivia_questions WHERE status = 'ready' AND type = $1",
+      [round.type],
     );
 
     const chosen = shuffled(result.rows, random).slice(0, round.count);
     if (chosen.length < round.count) {
-      throw new QuizStoreError(409, `${round.category} no longer has ${round.count} ready question(s).`);
+      throw new QuizStoreError(409, `${typeLabel(round.type)} no longer has ${round.count} ready question(s).`);
     }
     for (const row of chosen) {
       const question = await triviaService.presentQuestion(row);
-      picked.push({ ...question, roundIndex, roundTitle: round.category });
+      picked.push({ ...question, roundIndex, roundTitle: typeLabel(round.type) });
     }
   }
 
@@ -237,7 +241,7 @@ module.exports = {
   markFinished,
   markStarted,
   pickQuestions,
-  readyCategoryCounts,
+  readyTypeCounts,
   saveLockedQuestion,
   wasPlayer,
 };

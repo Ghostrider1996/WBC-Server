@@ -116,9 +116,11 @@ test("the solution is not in the public or player state until the reveal", () =>
   game.start(list);
   clock.advance(3000);
 
-  const during = JSON.stringify([game.publicState(), game.playerState("a"), game.hostState()]);
+  const during = JSON.stringify([game.publicState(), game.playerState("a")]);
   assert.ok(!during.includes('"correct"'));
   assert.ok(!during.includes("Why q1"));
+  assert.deepEqual(game.hostState().answer.correctIds, [RIGHT]);
+  assert.equal(game.hostState().answer.explanation, "Why q1");
 
   clock.advance(20400);
   assert.equal(game.phase, "reveal");

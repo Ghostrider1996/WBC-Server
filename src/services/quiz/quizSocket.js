@@ -90,7 +90,7 @@ function attachQuizSockets(httpServer, deps = {}) {
           const isHost = socket.data.role === "host";
           socket.emit("quiz:state", {
             state,
-            you: isHost ? { joined: false } : game.playerState(socket.data.discordId),
+            you: game.playerState(socket.data.discordId),
             ...(isHost ? { host } : {}),
             role: socket.data.role,
           });
@@ -112,7 +112,7 @@ function attachQuizSockets(httpServer, deps = {}) {
     let count = 0;
     for (const id of room) {
       const peer = io.sockets.sockets.get(id);
-      if (id !== exceptSocketId && peer?.data.role === "player" && peer.data.discordId === discordId) count += 1;
+      if (id !== exceptSocketId && peer?.data.discordId === discordId && peer.data.playing) count += 1;
     }
     return count;
   }
@@ -124,7 +124,9 @@ function attachQuizSockets(httpServer, deps = {}) {
       socket.data.sessionId = null;
       socket.leave(roomName(sessionId));
       socket.leave(hostRoomName(sessionId));
-      if (role === "player" && connectedCount(sessionId, discordId, socket.id) === 0) {
+      const wasPlaying = socket.data.playing;
+      socket.data.playing = false;
+      if (wasPlaying && connectedCount(sessionId, discordId, socket.id) === 0) {
         manager.games.get(sessionId)?.setConnected(discordId, false);
       }
     };
@@ -144,9 +146,12 @@ function attachQuizSockets(httpServer, deps = {}) {
         if (!game) return reply({ ok: false, code: "not_found", reason: "That quiz is not open." });
 
         const { discordId } = socket.data;
-        const host = game.meta.hostDiscordId === discordId || await isHostAllowed(discordId);
+        const canHost = game.meta.hostDiscordId === discordId || await isHostAllowed(discordId);
+        const asScreen = payload?.mode === "screen";
+        const asPlayer = payload?.mode === "player";
+        const asHost = canHost && !asPlayer;
 
-        if (!host) {
+        if (!canHost) {
           let signedUp;
           try {
             signedUp = await signups.isSignedUp(game.meta.raidHelperEventId, discordId);
@@ -159,44 +164,44 @@ function attachQuizSockets(httpServer, deps = {}) {
           }
         }
 
-        if (payload?.mode === "screen" && !host) {
+        if (asScreen && !canHost) {
           return reply({ ok: false, code: "forbidden", reason: "Only hosts can open the big screen." });
         }
 
         leave();
         wire(game);
 
-        if (host) {
-          socket.data.role = "host";
-          socket.data.sessionId = sessionId;
-          await socket.join([roomName(sessionId), hostRoomName(sessionId)]);
-        } else {
+        const play = !asScreen;
+        if (play) {
           game.addPlayer({ discordId, name: socket.data.name, avatar: socket.data.avatar });
 
-          // One live tab per player: the older one is told it was replaced.
-          const room = io.sockets.adapter.rooms.get(roomName(sessionId));
-          for (const id of room || []) {
-            const peer = io.sockets.sockets.get(id);
-            if (peer && peer.id !== socket.id && peer.data.role === "player" && peer.data.discordId === discordId) {
-              peer.emit("quiz:replaced");
-              peer.data.sessionId = null;
-              peer.leave(roomName(sessionId));
+          if (!asHost) {
+            const room = io.sockets.adapter.rooms.get(roomName(sessionId));
+            for (const id of room || []) {
+              const peer = io.sockets.sockets.get(id);
+              if (peer && peer.id !== socket.id && peer.data.role === "player" && peer.data.discordId === discordId) {
+                peer.emit("quiz:replaced");
+                peer.data.sessionId = null;
+                peer.data.playing = false;
+                peer.leave(roomName(sessionId));
+              }
             }
           }
-
-          socket.data.role = "player";
-          socket.data.sessionId = sessionId;
-          await socket.join(roomName(sessionId));
-          game.setConnected(discordId, true);
         }
+
+        socket.data.role = asHost ? "host" : "player";
+        socket.data.playing = play;
+        socket.data.sessionId = sessionId;
+        await socket.join(asHost ? [roomName(sessionId), hostRoomName(sessionId)] : roomName(sessionId));
+        if (play) game.setConnected(discordId, true);
 
         return reply({
           ok: true,
           role: socket.data.role,
           serverNow: Date.now(),
           state: game.publicState(),
-          you: socket.data.role === "host" ? { joined: false } : game.playerState(discordId),
-          ...(socket.data.role === "host" ? { host: game.hostState() } : {}),
+          you: game.playerState(discordId),
+          ...(asHost ? { host: game.hostState() } : {}),
         });
       } catch (error) {
         return reply(failure(error));
@@ -208,7 +213,7 @@ function attachQuizSockets(httpServer, deps = {}) {
       try {
         const { sessionId, role, discordId } = socket.data;
         const game = sessionId ? manager.games.get(sessionId) : null;
-        if (!game || role !== "player") throw new QuizGameError("not_playing", "Join the quiz first.");
+        if (!game || !socket.data.playing) throw new QuizGameError("not_playing", "Join the quiz first.");
         game.submitAnswer(discordId, payload?.response);
         return reply({ ok: true, you: game.playerState(discordId) });
       } catch (error) {
@@ -232,6 +237,9 @@ function attachQuizSockets(httpServer, deps = {}) {
         else if (action === "resume") game.resume();
         else if (action === "extend") game.extend(payload.seconds);
         else if (action === "kick") {
+          if (payload.discordId === socket.data.discordId) {
+            throw new QuizGameError("invalid", "You cannot remove yourself.");
+          }
           if (typeof payload.discordId !== "string" || !game.kick(payload.discordId)) {
             throw new QuizGameError("invalid", "That player is not in the quiz.");
           }

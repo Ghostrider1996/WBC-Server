@@ -552,7 +552,12 @@ class QuizGame extends EventEmitter {
     const waitingOn = this.phase === PHASES.QUESTION
       ? this.connectedPlayers().filter((player) => !this.answers.has(player.discordId)).map((player) => player.name)
       : [];
-    return { waitingOn };
+    const current = this.questions[this.index];
+    return {
+      waitingOn,
+      question: this.currentView,
+      answer: current ? toReveal(current) : null,
+    };
   }
 }
 

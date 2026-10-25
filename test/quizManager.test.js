@@ -9,7 +9,7 @@ const SESSION = {
   raidHelperEventId: "event-1",
   hostDiscordId: "host",
   status: "lobby",
-  rounds: [{ category: "Guild", count: 1 }],
+  rounds: [{ type: "true_false", count: 1 }],
   settings: { introMs: 10 },
 };
 
