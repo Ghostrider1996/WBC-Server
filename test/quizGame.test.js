@@ -99,6 +99,8 @@ test("intro runs on a timer, then the question opens with a server-owned deadlin
   assert.equal(game.phase, "intro");
   assert.equal(game.publicState().round.title, "Round 0");
   assert.equal(game.publicState().question, undefined);
+  assert.equal(game.publicState().intro.type, "single_choice");
+  assert.equal(game.publicState().intro.totalMs, 3000);
 
   clock.advance(2999);
   assert.equal(game.phase, "intro");

@@ -502,7 +502,14 @@ class QuizGame extends EventEmitter {
     };
 
     if (this.phase === PHASES.INTRO) {
-      state.intro = { endsAt: this.phaseEndsAt };
+      const view = this.currentView || {};
+      state.intro = {
+        endsAt: this.phaseEndsAt,
+        totalMs: this.settings.introMs,
+        type: view.type || null,
+        format: view.format || null,
+        points: view.points ?? null,
+      };
     }
 
     if (this.phase === PHASES.QUESTION || this.phase === PHASES.REVEAL) {
@@ -519,6 +526,7 @@ class QuizGame extends EventEmitter {
     if (this.phase === PHASES.REVEAL) state.reveal = this.reveal;
     if (this.phaseEndsAt && (this.phase === PHASES.REVEAL || this.phase === PHASES.LEADERBOARD)) {
       state.nextAt = this.phaseEndsAt;
+      state.holdMs = this.phase === PHASES.REVEAL ? this.settings.revealMs : this.settings.leaderboardMs;
     }
 
     return state;
