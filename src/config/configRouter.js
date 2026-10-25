@@ -14,10 +14,12 @@ const soundtrackRouter = require("../controllers/soundtrackController");
 const huntRouter = require("../controllers/huntController");
 const triviaRouter = require("../controllers/triviaController");
 const { triviaErrorHandler } = triviaRouter;
+const quizRouter = require("../controllers/quizController");
 
 function configRoutes(app) {
   app.use("/api", huntRouter);
   app.use("/api", triviaRouter);
+  app.use("/api", quizRouter);
   app.use("/api", raidHelperRouter);
   app.use("/api", discordAuthRouter);
   app.use("/api", blizzardAuthRouter);

@@ -5,6 +5,7 @@ const { configRoutes } = require("./config/configRouter");
 const { configExpress } = require("./config/configExpress");
 const { query } = require("./db/pool");
 const { ensureSchema } = require("./db/ensureSchema");
+const { attachQuizSockets } = require("./services/quiz/quizSocket");
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
@@ -28,7 +29,7 @@ app.get("/api/health", async (_req, res) => {
 
 configRoutes(app);
 
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   console.log(`Guild backend running on http://localhost:${PORT}`);
 
   try {
@@ -39,3 +40,5 @@ app.listen(PORT, async () => {
     console.error("Neon database connection failed:", error.message);
   }
 });
+
+attachQuizSockets(server);

@@ -450,3 +450,55 @@ DROP TRIGGER IF EXISTS trivia_questions_set_updated_at ON trivia_questions;
 CREATE TRIGGER trivia_questions_set_updated_at
   BEFORE UPDATE ON trivia_questions
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TABLE IF NOT EXISTS quiz_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  raid_helper_event_id TEXT NOT NULL,
+  host_discord_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'lobby' CHECK (status IN ('lobby','live','ended','cancelled')),
+  rounds JSONB NOT NULL,
+  settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at TIMESTAMPTZ,
+  ended_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS quiz_sessions_one_open_per_event_idx
+  ON quiz_sessions (raid_helper_event_id)
+  WHERE status IN ('lobby','live');
+
+CREATE INDEX IF NOT EXISTS quiz_sessions_created_at_idx
+  ON quiz_sessions (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS quiz_session_questions (
+  session_id UUID NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  round_index INTEGER NOT NULL,
+  question_id UUID REFERENCES trivia_questions(id) ON DELETE SET NULL,
+  snapshot JSONB NOT NULL,
+  PRIMARY KEY (session_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS quiz_players (
+  session_id UUID NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+  discord_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  score INTEGER NOT NULL DEFAULT 0,
+  correct_count INTEGER NOT NULL DEFAULT 0,
+  total_time_ms BIGINT NOT NULL DEFAULT 0,
+  final_rank INTEGER,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (session_id, discord_id)
+);
+
+CREATE TABLE IF NOT EXISTS quiz_answers (
+  session_id UUID NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  discord_id TEXT NOT NULL,
+  response JSONB,
+  verdict TEXT NOT NULL CHECK (verdict IN ('correct','partial','wrong','none')),
+  points INTEGER NOT NULL DEFAULT 0,
+  elapsed_ms INTEGER,
+  PRIMARY KEY (session_id, position, discord_id)
+);

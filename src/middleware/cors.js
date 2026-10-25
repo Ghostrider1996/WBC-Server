@@ -1,4 +1,4 @@
-function cors() {
+function createOriginChecker() {
   const configuredOrigins = (process.env.WBC_WEB_ORIGIN || "")
     .split(",")
     .map((origin) => origin.trim())
@@ -28,6 +28,12 @@ function cors() {
       || /^http:\/\/localhost:\d+$/i.test(origin);
   };
 
+  return isAllowedOrigin;
+}
+
+function cors() {
+  const isAllowedOrigin = createOriginChecker();
+
   return function (req, res, next) {
     const origin = req.headers.origin;
 
@@ -50,6 +56,4 @@ function cors() {
   };
 }
 
-module.exports = cors;
-
-module.exports = { cors };
+module.exports = { cors, createOriginChecker };

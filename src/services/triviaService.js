@@ -447,6 +447,7 @@ module.exports = {
   listQuestions,
   listTriviaAdmins,
   parseListFilters,
+  presentQuestion,
   removeTriviaAdmin,
   removeUnreferencedMedia,
   replaceQuestion,
