@@ -1,9 +1,6 @@
 /** Validation for the pieces a host chooses when creating a quiz night. Pure, no I/O. */
 
-const { QUESTION_TYPES } = require("../triviaValidation");
-
-const MAX_ROUNDS = 20;
-const MAX_PER_ROUND = 50;
+const MAX_QUESTIONS = 50;
 const TITLE_MAX = 80;
 
 const TYPE_LABELS = {
@@ -36,47 +33,64 @@ function clampInt(value, min, max, fallback) {
 }
 
 /**
- * Turns the host's chosen rounds into `[{ type, count }]`.
- * `available` maps question type -> number of ready questions.
+ * Host picks how many questions to take from each type. Those picks are later
+ * shuffled into one mixed list, not played type-by-type.
  */
-function normalizeRounds(raw, available) {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw new QuizSetupError("Add at least one round.", { rounds: "Add at least one round." });
-  }
-  if (raw.length > MAX_ROUNDS) {
-    throw new QuizSetupError(`Use at most ${MAX_ROUNDS} rounds.`, { rounds: `Use at most ${MAX_ROUNDS} rounds.` });
-  }
-
+function normalizePool(raw, available) {
+  const input = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const fields = {};
   const seen = new Set();
-  const rounds = raw.map((round, index) => {
-    const type = typeof round?.type === "string" ? round.type.trim() : "";
-    const count = Number(round?.count);
+  const types = [];
 
-    if (!type) {
-      fields[`rounds[${index}].type`] = "Pick a question type.";
-    } else if (!QUESTION_TYPES.includes(type)) {
-      fields[`rounds[${index}].type`] = "That is not a question type.";
-    } else if (seen.has(type)) {
-      fields[`rounds[${index}].type`] = "Each type can only be used once.";
-    } else if (!available.has(type)) {
-      fields[`rounds[${index}].type`] = "That type has no ready questions.";
+  const listed = Array.isArray(input.types) ? input.types : [];
+  if (listed.length === 0) {
+    fields.types = "Choose how many questions you want from at least one type.";
+  }
+
+  listed.forEach((entry, index) => {
+    const type = typeof entry === "string" ? entry.trim() : typeof entry?.type === "string" ? entry.type.trim() : "";
+    const count = Number(entry?.count ?? (typeof entry === "string" ? 0 : entry?.count));
+
+    if (!type) return;
+    if (seen.has(type)) {
+      fields[`types[${index}].type`] = "Each type can only be used once.";
+      return;
     }
-    if (type) seen.add(type);
+    seen.add(type);
 
-    if (!Number.isInteger(count) || count < 1 || count > MAX_PER_ROUND) {
-      fields[`rounds[${index}].count`] = `Choose 1 to ${MAX_PER_ROUND} questions.`;
-    } else if (available.has(type) && count > available.get(type)) {
-      fields[`rounds[${index}].count`] = `Only ${available.get(type)} ready question(s) of this type.`;
+    if (!TYPE_LABELS[type]) {
+      fields[`types[${index}].type`] = "That is not a question type.";
+      return;
     }
-
-    return { type, count };
+    if (!available.has(type)) {
+      fields[`types[${index}].type`] = `${typeLabel(type)} has no ready questions.`;
+      return;
+    }
+    if (!Number.isInteger(count) || count < 0 || count > MAX_QUESTIONS) {
+      fields[`types[${index}].count`] = `Choose 0 to ${MAX_QUESTIONS} questions.`;
+      return;
+    }
+    if (count === 0) return;
+    if (count > available.get(type)) {
+      fields[`types[${index}].count`] = `Only ${available.get(type)} ready ${typeLabel(type)} question(s).`;
+      return;
+    }
+    types.push({ type, count });
   });
 
-  if (Object.keys(fields).length > 0) {
-    throw new QuizSetupError("One or more rounds are not valid.", fields);
+  const total = types.reduce((sum, item) => sum + item.count, 0);
+  if (listed.length > 0 && types.length === 0 && !fields.types && Object.keys(fields).length === 0) {
+    fields.types = "Choose how many questions you want from at least one type.";
   }
-  return rounds;
+  if (total > MAX_QUESTIONS) {
+    fields.types = `Use at most ${MAX_QUESTIONS} questions in total.`;
+  }
+
+  if (Object.keys(fields).length > 0) {
+    throw new QuizSetupError("The question pool is not valid.", fields);
+  }
+
+  return { types, count: total };
 }
 
 /** Clamps host-supplied settings to safe values; anything missing keeps its default. */
@@ -97,4 +111,4 @@ function normalizeTitle(raw, fallback) {
   return chosen.slice(0, TITLE_MAX);
 }
 
-module.exports = { QuizSetupError, TYPE_LABELS, normalizeRounds, normalizeSettings, normalizeTitle, typeLabel };
+module.exports = { QuizSetupError, TYPE_LABELS, normalizePool, normalizeSettings, normalizeTitle, typeLabel };

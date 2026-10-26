@@ -40,7 +40,7 @@ const SESSION_SELECT = `
   LEFT JOIN users u ON u.discord_id = s.host_discord_id
 `;
 
-/** Number of ready questions per type: what a host can build rounds from. */
+/** Number of ready questions per type: kept for older consoles. */
 async function readyTypeCounts() {
   const result = await query(
     `SELECT type, count(*)::int AS count
@@ -52,6 +52,18 @@ async function readyTypeCounts() {
   return QUESTION_TYPES
     .filter((type) => byType.has(type))
     .map((type) => ({ type, label: typeLabel(type), count: byType.get(type) }));
+}
+
+/** Ready questions grouped by category: what a host builds a pool from. */
+async function readyCategoryCounts() {
+  const result = await query(
+    `SELECT category AS name, count(*)::int AS count
+     FROM trivia_questions
+     WHERE status = 'ready'
+     GROUP BY category
+     ORDER BY lower(category), category`,
+  );
+  return result.rows;
 }
 
 async function createSession({ title, raidHelperEventId, hostDiscordId, rounds, settings }) {
@@ -84,30 +96,41 @@ async function listOpenSessions() {
 }
 
 /**
- * Draws each round's questions at random from the ready ones of its type.
+ * Draws the asked count from each type, then shuffles the combined list so
+ * types mix instead of playing in blocks.
  * Media links are signed now, when the quiz starts, so they outlive the night.
  */
-async function pickQuestions(rounds, random = Math.random) {
-  const picked = [];
+async function pickQuestions(pool, random = Math.random) {
+  const types = Array.isArray(pool?.types) ? pool.types : [];
+  if (types.length === 0) {
+    throw new QuizStoreError(400, "Choose how many questions you want from at least one type.");
+  }
 
-  for (let roundIndex = 0; roundIndex < rounds.length; roundIndex += 1) {
-    const round = rounds[roundIndex];
+  const picked = [];
+  for (const entry of types) {
+    const type = typeof entry === "string" ? entry : entry?.type;
+    const count = typeof entry === "string" ? Number(pool.count) || 0 : Number(entry?.count) || 0;
+    if (!type || count < 1) continue;
+
     const result = await query(
       "SELECT * FROM trivia_questions WHERE status = 'ready' AND type = $1",
-      [round.type],
+      [type],
     );
-
-    const chosen = shuffled(result.rows, random).slice(0, round.count);
-    if (chosen.length < round.count) {
-      throw new QuizStoreError(409, `${typeLabel(round.type)} no longer has ${round.count} ready question(s).`);
+    const chosen = shuffled(result.rows, random).slice(0, count);
+    if (chosen.length < count) {
+      throw new QuizStoreError(409, `${typeLabel(type)} no longer has ${count} ready question(s).`);
     }
     for (const row of chosen) {
       const question = await triviaService.presentQuestion(row);
-      picked.push({ ...question, roundIndex, roundTitle: typeLabel(round.type) });
+      picked.push({ ...question, roundIndex: 0, roundTitle: typeLabel(question.type) });
     }
   }
 
-  return picked;
+  if (picked.length === 0) {
+    throw new QuizStoreError(400, "Choose how many questions you want from at least one type.");
+  }
+
+  return shuffled(picked, random);
 }
 
 async function markStarted(sessionId, questions) {
@@ -241,6 +264,7 @@ module.exports = {
   markFinished,
   markStarted,
   pickQuestions,
+  readyCategoryCounts,
   readyTypeCounts,
   saveLockedQuestion,
   wasPlayer,

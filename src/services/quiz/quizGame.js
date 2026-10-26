@@ -307,6 +307,7 @@ class QuizGame extends EventEmitter {
     const previous = new Map(this.standings.map((entry) => [entry.discordId, entry.rank]));
     const verdictCounts = { correct: 0, partial: 0, wrong: 0, noAnswer: 0 };
     const choices = {};
+    const responses = [];
     const locked = [];
 
     this.results = new Map();
@@ -318,6 +319,7 @@ class QuizGame extends EventEmitter {
         player.lastGain = 0;
         verdictCounts.noAnswer += 1;
         this.results.set(player.discordId, { answered: false, verdict: "none", fraction: 0, points: 0 });
+        responses.push({ discordId: player.discordId, name: player.name, response: null, verdict: "none", points: 0 });
         continue;
       }
 
@@ -346,11 +348,18 @@ class QuizGame extends EventEmitter {
         elapsedMs,
       };
       this.results.set(player.discordId, result);
+      responses.push({
+        discordId: player.discordId,
+        name: player.name,
+        response: answer.response,
+        verdict: grade.verdict,
+        points,
+      });
       locked.push({ discordId: player.discordId, name: player.name, ...result });
     }
 
     this.standings = this.computeStandings();
-    this.reveal = { ...toReveal(question), verdictCounts, choices };
+    this.reveal = { ...toReveal(question), verdictCounts, choices, responses };
     this.emit("locked", {
       index: this.index,
       question,

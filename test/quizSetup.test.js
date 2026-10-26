@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { QuizSetupError, normalizeRounds, normalizeSettings, normalizeTitle } = require("../src/services/quiz/quizSetup");
+const { QuizSetupError, normalizePool, normalizeSettings, normalizeTitle } = require("../src/services/quiz/quizSetup");
 
 const available = new Map([["single_choice", 6], ["true_false", 3]]);
 
@@ -14,23 +14,24 @@ function fields(work) {
   assert.fail("expected QuizSetupError");
 }
 
-test("rounds: each type once, counts within what is ready", () => {
+test("pool: a count per type, skipping zeros", () => {
   assert.deepEqual(
-    normalizeRounds([{ type: "single_choice", count: 2 }, { type: "true_false", count: 3 }], available),
-    [{ type: "single_choice", count: 2 }, { type: "true_false", count: 3 }],
+    normalizePool({
+      types: [
+        { type: "single_choice", count: 2 },
+        { type: "true_false", count: 3 },
+      ],
+    }, available),
+    { types: [{ type: "single_choice", count: 2 }, { type: "true_false", count: 3 }], count: 5 },
   );
 });
 
-test("rounds: empty, duplicate, unknown and over-count are field errors", () => {
-  assert.equal(fields(() => normalizeRounds([], available)).rounds, "Add at least one round.");
-  assert.match(fields(() => normalizeRounds(
-    [{ type: "single_choice", count: 1 }, { type: "single_choice", count: 1 }],
-    available,
-  ))["rounds[1].type"], /once/);
-  assert.match(fields(() => normalizeRounds([{ type: "sort", count: 1 }], available))["rounds[0].type"], /no ready/);
-  assert.match(fields(() => normalizeRounds([{ type: "map", count: 1 }], available))["rounds[0].type"], /not a question type/);
-  assert.match(fields(() => normalizeRounds([{ type: "single_choice", count: 7 }], available))["rounds[0].count"], /Only 6/);
-  assert.match(fields(() => normalizeRounds([{ type: "single_choice", count: 0 }], available))["rounds[0].count"], /1 to 50/);
+test("pool: empty, unknown and over-count are field errors", () => {
+  assert.equal(fields(() => normalizePool({ types: [] }, available)).types, "Choose how many questions you want from at least one type.");
+  assert.match(fields(() => normalizePool({ types: [{ type: "sort", count: 1 }] }, available))["types[0].type"], /no ready/);
+  assert.match(fields(() => normalizePool({ types: [{ type: "map", count: 1 }] }, available))["types[0].type"], /not a question type/);
+  assert.match(fields(() => normalizePool({ types: [{ type: "single_choice", count: 7 }] }, available))["types[0].count"], /Only 6/);
+  assert.match(fields(() => normalizePool({ types: [{ type: "single_choice", count: 0 }] }, available)).types, /at least one type/);
 });
 
 test("settings clamp to safe values and keep defaults", () => {

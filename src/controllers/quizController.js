@@ -5,7 +5,7 @@ const triviaService = require("../services/triviaService");
 const raidHelperService = require("../services/raidHelperService");
 const quizStore = require("../services/quiz/quizStore");
 const { getSharedManager } = require("../services/quiz/quizManager");
-const { normalizeRounds, normalizeSettings, normalizeTitle } = require("../services/quiz/quizSetup");
+const { normalizePool, normalizeSettings, normalizeTitle } = require("../services/quiz/quizSetup");
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const GENERIC_FAILURE = "The quiz could not be updated.";
@@ -90,9 +90,12 @@ function createQuizRouter(deps = {}) {
 
   router.use("/quiz", requireSession);
 
-  // What a host can build rounds from: types with ready questions.
   router.get("/quiz/types", requireHost, handle(async () => ({
     types: await store.readyTypeCounts(),
+  })));
+
+  router.get("/quiz/categories", requireHost, handle(async () => ({
+    categories: await store.readyCategoryCounts(),
   })));
 
   router.post("/quiz/sessions", requireHost, handle(async (req) => {
@@ -113,7 +116,7 @@ function createQuizRouter(deps = {}) {
       title: normalizeTitle(body.title, event?.title ?? event?.name),
       raidHelperEventId: eventId,
       hostDiscordId: req.quizSession.discordId,
-      rounds: normalizeRounds(body.rounds, available),
+      rounds: normalizePool(body, available),
       settings: normalizeSettings(body.settings),
     });
 

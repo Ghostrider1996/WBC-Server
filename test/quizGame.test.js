@@ -223,9 +223,14 @@ test("players who do not answer score nothing and are counted in the reveal", ()
   game.submitAnswer("a", RIGHT);
   clock.advance(20400);
 
-  const { verdictCounts, choices } = game.publicState().reveal;
+  const { verdictCounts, choices, responses } = game.publicState().reveal;
   assert.deepEqual(verdictCounts, { correct: 1, partial: 0, wrong: 0, noAnswer: 2 });
   assert.deepEqual(choices, { 0: 1 });
+  assert.deepEqual(responses, [
+    { discordId: "a", name: "Alice", response: RIGHT, verdict: "correct", points: 1000 },
+    { discordId: "b", name: "Bob", response: null, verdict: "none", points: 0 },
+    { discordId: "c", name: "Cara", response: null, verdict: "none", points: 0 },
+  ]);
   assert.equal(game.playerState("b").result.answered, false);
 });
 
