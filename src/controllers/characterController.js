@@ -20,6 +20,7 @@ const {
   summarizeLogs,
   clearLogsCache,
 } = require("../services/warcraftLogsService");
+const { listRosterForDiscord } = require("../services/bridgeService");
 
 const characterRouter = Router();
 
@@ -89,6 +90,19 @@ async function buildProfile(user, { refreshLogs = false } = {}) {
     logs: logsEnabled ? summarizeLogs(characters) : {},
   };
 }
+
+characterRouter.get("/characters/roster", async (req, res) => {
+  const discordId = requireDiscordId(req, res);
+  if (!discordId) return;
+
+  try {
+    const characters = await listRosterForDiscord(discordId);
+    return res.status(200).json({ characters });
+  } catch (error) {
+    console.error("List roster characters failed:", error.message);
+    return res.status(500).json({ reason: "Characters could not be loaded.", status: "failed" });
+  }
+});
 
 characterRouter.get("/characters", async (req, res) => {
   const discordId = requireDiscordId(req, res);

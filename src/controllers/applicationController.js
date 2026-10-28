@@ -1,4 +1,5 @@
 const { Router } = require("express");
+const { rememberApplicant } = require("../services/applicantService");
 const { submitApplication } = require("../services/discordWebhookService");
 
 const applicationRouter = Router();
@@ -12,6 +13,11 @@ applicationRouter.post("/applications", async (req, res) => {
   }
 
   try {
+    try {
+      await rememberApplicant(applicant);
+    } catch (error) {
+      console.error("Applicant could not be stored:", error.message);
+    }
     await submitApplication(type, fields, applicant);
     return res.status(201).json({ status: "submitted" });
   } catch (error) {

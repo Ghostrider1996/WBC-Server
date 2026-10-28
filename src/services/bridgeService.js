@@ -961,7 +961,37 @@ async function dropCopiedProfessionRecipes(client, professionRows, recipesByKey)
   }
 }
 
-function presentMember(row) {
+async function discordNamesByMain(pool) {
+  const result = await pool.query(`
+    SELECT DISTINCT ON (lower(btrim(a.main_character_name)))
+      btrim(a.main_character_name) AS main_name,
+      COALESCE(
+        NULLIF(btrim(u.global_name), ''),
+        NULLIF(btrim(a.global_name), ''),
+        NULLIF(btrim(u.username), ''),
+        NULLIF(btrim(a.username), '')
+      ) AS discord_name
+    FROM guild_applicants a
+    LEFT JOIN users u ON u.discord_id = a.discord_id
+    WHERE COALESCE(btrim(a.main_character_name), '') <> ''
+    ORDER BY lower(btrim(a.main_character_name)), a.updated_at DESC
+  `);
+  const names = new Map();
+  for (const row of result.rows) {
+    const key = String(row.main_name || "").trim().toLowerCase();
+    const name = String(row.discord_name || "").trim();
+    if (key && name) names.set(key, name);
+  }
+  return names;
+}
+
+function discordNameForMember(row, names) {
+  const own = names.get(String(row.character_name || "").trim().toLowerCase());
+  if (own) return own;
+  return names.get(String(row.main_character_name || "").trim().toLowerCase()) || "";
+}
+
+function presentMember(row, discordName = "") {
   return {
     name: row.character_name,
     rankIndex: row.rank_index ?? rankIndexFromName(row.rank_name),
@@ -971,6 +1001,7 @@ function presentMember(row) {
     publicNote: row.public_note || "",
     online: Boolean(row.online),
     mainCharacterName: row.main_character_name || "",
+    discordName,
     lastOnlineDays: row.last_online_days,
     lastOnlineHours: row.last_online_hours,
     lastOnline: row.last_online_text || "",
@@ -996,9 +1027,47 @@ function presentProfession(row, recipes) {
   };
 }
 
+async function listRosterForDiscord(discordId) {
+  const id = String(discordId || "").replace(/\D/g, "");
+  if (!/^\d{17,20}$/.test(id)) return [];
+
+  const pool = getPool();
+  const linked = await pool.query(
+    `SELECT btrim(main_character_name) AS name
+     FROM guild_applicants
+     WHERE discord_id = $1`,
+    [id],
+  );
+  const mainName = String(linked.rows[0]?.name || "").trim();
+  if (!mainName) return [];
+
+  const [members, discordByMain] = await Promise.all([
+    pool.query(
+    `SELECT character_name, rank_index, rank_name, level, class, public_note, online,
+            last_online_days, last_online_hours, last_online_text, main_character_name
+     FROM guild_roster_members
+     WHERE lower(character_name) = lower($1)
+        OR lower(btrim(main_character_name)) = lower($1)
+     ORDER BY lower(character_name) ASC`,
+      [mainName],
+    ),
+    discordNamesByMain(pool),
+  ]);
+
+  return members.rows
+    .map((row) => ({
+      ...presentMember(row, discordNameForMember(row, discordByMain)),
+      isMain: String(row.character_name || "").trim().toLowerCase() === mainName.toLowerCase(),
+    }))
+    .sort((left, right) => {
+      if (left.isMain !== right.isMain) return left.isMain ? -1 : 1;
+      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    });
+}
+
 async function listGuildRoster() {
   const pool = getPool();
-  const [meta, members, professions, recipes] = await Promise.all([
+  const [meta, members, professions, recipes, discordByMain] = await Promise.all([
     pool.query("SELECT roster_updated_at AS \"rosterUpdatedAt\" FROM guild_roster_meta WHERE id = 1"),
     pool.query(`
       SELECT character_name, rank_index, rank_name, level, class, public_note, online,
@@ -1020,6 +1089,7 @@ async function listGuildRoster() {
       FROM guild_profession_recipes
       ORDER BY lower(recipe_name) ASC, recipe_id ASC
     `),
+    discordNamesByMain(pool),
   ]);
 
   const visibleNames = new Set(members.rows.map((row) => String(row.character_name || "").toLowerCase()));
@@ -1029,7 +1099,7 @@ async function listGuildRoster() {
 
   return {
     rosterUpdatedAt: meta.rows[0]?.rosterUpdatedAt || null,
-    members: members.rows.map(presentMember),
+    members: members.rows.map((row) => presentMember(row, discordNameForMember(row, discordByMain))),
     professions: visibleProfessions.map((row) => (
       presentProfession(row, recipesForProfessionRow(row, recipesByKey, canonicalByCharacter))
     )),
@@ -1040,4 +1110,5 @@ module.exports = {
   authorizeBridge,
   ingestBridgeUpload,
   listGuildRoster,
+  listRosterForDiscord,
 };

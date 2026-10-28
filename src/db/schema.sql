@@ -493,6 +493,16 @@ CREATE TABLE IF NOT EXISTS quiz_players (
   PRIMARY KEY (session_id, discord_id)
 );
 
+CREATE TABLE IF NOT EXISTS guild_applicants (
+  discord_id TEXT PRIMARY KEY,
+  username TEXT NOT NULL DEFAULT '',
+  global_name TEXT,
+  avatar TEXT,
+  main_character_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS quiz_answers (
   session_id UUID NOT NULL REFERENCES quiz_sessions(id) ON DELETE CASCADE,
   position INTEGER NOT NULL,

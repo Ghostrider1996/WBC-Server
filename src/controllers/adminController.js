@@ -2,8 +2,10 @@ const { Router } = require("express");
 const {
   addGuildAdmin,
   getAdminStatus,
+  isAdmin,
   listGuildAdmins,
 } = require("../services/adminService");
+const { listApplicants, setApplicantMains } = require("../services/applicantService");
 
 const adminRouter = Router();
 
@@ -40,6 +42,32 @@ adminRouter.get("/admins", async (req, res) => {
     return res.status(200).json(payload);
   } catch (error) {
     return handleAdminError(res, error, "Admin status could not be loaded.");
+  }
+});
+
+adminRouter.get("/applicants", async (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (!(await isAdmin(actor))) {
+      return res.status(403).json({ reason: "Only a guild admin can view applicants.", status: "failed" });
+    }
+
+    return res.status(200).json({ applicants: await listApplicants() });
+  } catch (error) {
+    return handleAdminError(res, error, "Applicants could not be loaded.");
+  }
+});
+
+adminRouter.post("/applicants/mains", async (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (!(await isAdmin(actor))) {
+      return res.status(403).json({ reason: "Only a guild admin can set main characters.", status: "failed" });
+    }
+
+    return res.status(200).json({ applicants: await setApplicantMains(req.body?.applicants) });
+  } catch (error) {
+    return handleAdminError(res, error, "The main characters could not be saved.");
   }
 });
 
