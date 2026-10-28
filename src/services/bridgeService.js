@@ -614,6 +614,44 @@ async function upsertRosterMembers(client, members) {
   }
 }
 
+function isAltPlayerRank(rankName) {
+  return asTrimmedString(rankName).toLowerCase() === "alt player";
+}
+
+function characterKey(name) {
+  return asTrimmedString(name).toLowerCase();
+}
+
+async function linkMainsAndAlts(client) {
+  const result = await client.query(`
+    SELECT character_name, rank_name, officer_note
+    FROM guild_roster_members
+  `);
+  const byName = new Map();
+  for (const row of result.rows) byName.set(characterKey(row.character_name), row);
+
+  for (const row of result.rows) {
+    let mainName = null;
+    if (isAltPlayerRank(row.rank_name)) {
+      const noted = byName.get(characterKey(row.officer_note));
+      if (
+        noted
+        && characterKey(noted.character_name) !== characterKey(row.character_name)
+        && !isAltPlayerRank(noted.rank_name)
+      ) {
+        mainName = noted.character_name;
+      }
+    }
+
+    await client.query(
+      `UPDATE guild_roster_members
+       SET main_character_name = $2
+       WHERE lower(character_name) = lower($1)`,
+      [row.character_name, mainName],
+    );
+  }
+}
+
 async function deleteCharactersNotIn(client, names) {
   const kept = [...new Set(names.map((name) => name.toLowerCase()).filter(Boolean))];
   if (kept.length === 0) return;
@@ -767,9 +805,10 @@ async function ingestBridgeUpload(payload = {}) {
     if (roster.length > 0) {
       await upsertRosterMembers(client, roster);
       await deleteCharactersNotIn(client, roster.map((member) => asTrimmedString(member.name)));
+      await linkMainsAndAlts(client);
     }
 
-    if (isFullProfessionSnapshot(payload) && professions.length > 0) {
+    if (isFullProfessionSnapshot(payload)) {
       await replaceProfessionTables(client);
     }
 
@@ -931,6 +970,7 @@ function presentMember(row) {
     class: row.class || "",
     publicNote: row.public_note || "",
     online: Boolean(row.online),
+    mainCharacterName: row.main_character_name || "",
     lastOnlineDays: row.last_online_days,
     lastOnlineHours: row.last_online_hours,
     lastOnline: row.last_online_text || "",
@@ -961,8 +1001,13 @@ async function listGuildRoster() {
   const [meta, members, professions, recipes] = await Promise.all([
     pool.query("SELECT roster_updated_at AS \"rosterUpdatedAt\" FROM guild_roster_meta WHERE id = 1"),
     pool.query(`
-      SELECT character_name, rank_index, rank_name, level, class, public_note, online, last_online_days, last_online_hours, last_online_text
+      SELECT character_name, rank_index, rank_name, level, class, public_note, online,
+             last_online_days, last_online_hours, last_online_text, main_character_name
       FROM guild_roster_members
+      WHERE NOT (
+        lower(rank_name) = 'alt player'
+        AND COALESCE(btrim(main_character_name), '') = ''
+      )
       ORDER BY rank_index ASC NULLS LAST, lower(character_name) ASC
     `),
     pool.query(`
@@ -977,13 +1022,15 @@ async function listGuildRoster() {
     `),
   ]);
 
+  const visibleNames = new Set(members.rows.map((row) => String(row.character_name || "").toLowerCase()));
+  const visibleProfessions = professions.rows.filter((row) => visibleNames.has(String(row.character_name || "").toLowerCase()));
   const recipesByKey = recipesByProfessionKey(recipes.rows);
-  const canonicalByCharacter = canonicalRecipeIdsByCharacter(professions.rows, recipesByKey);
+  const canonicalByCharacter = canonicalRecipeIdsByCharacter(visibleProfessions, recipesByKey);
 
   return {
     rosterUpdatedAt: meta.rows[0]?.rosterUpdatedAt || null,
     members: members.rows.map(presentMember),
-    professions: professions.rows.map((row) => (
+    professions: visibleProfessions.map((row) => (
       presentProfession(row, recipesForProfessionRow(row, recipesByKey, canonicalByCharacter))
     )),
   };
