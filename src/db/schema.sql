@@ -455,7 +455,8 @@ CREATE TRIGGER trivia_questions_set_updated_at
 CREATE TABLE IF NOT EXISTS quiz_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
-  raid_helper_event_id TEXT NOT NULL,
+  raid_helper_event_id TEXT,
+  allowed_discord_ids JSONB,
   host_discord_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'lobby' CHECK (status IN ('lobby','live','ended','cancelled')),
   rounds JSONB NOT NULL,
@@ -468,6 +469,9 @@ CREATE TABLE IF NOT EXISTS quiz_sessions (
 CREATE UNIQUE INDEX IF NOT EXISTS quiz_sessions_one_open_per_event_idx
   ON quiz_sessions (raid_helper_event_id)
   WHERE status IN ('lobby','live');
+
+ALTER TABLE quiz_sessions ALTER COLUMN raid_helper_event_id DROP NOT NULL;
+ALTER TABLE quiz_sessions ADD COLUMN IF NOT EXISTS allowed_discord_ids JSONB;
 
 CREATE INDEX IF NOT EXISTS quiz_sessions_created_at_idx
   ON quiz_sessions (created_at DESC);

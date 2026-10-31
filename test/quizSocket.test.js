@@ -32,7 +32,7 @@ function question(id) {
   };
 }
 
-function createStore() {
+function createStore(raidHelperEventId = "event-1", allowedDiscordIds = []) {
   const calls = { locked: [], finished: [], started: [] };
   return {
     calls,
@@ -40,7 +40,8 @@ function createStore() {
       ? {
         id,
         title: "Test quiz",
-        raidHelperEventId: "event-1",
+        raidHelperEventId,
+        allowedDiscordIds,
         hostDiscordId: HOST,
         status: "lobby",
         rounds: [{ type: "single_choice", count: 1 }],
@@ -104,7 +105,8 @@ class Client {
 }
 
 async function startServer(overrides = {}) {
-  const store = createStore();
+  const { raidHelperEventId, allowedDiscordIds, ...socketOverrides } = overrides;
+  const store = createStore(raidHelperEventId, allowedDiscordIds);
   const manager = new QuizManager({ store, logger: { error() {} } });
   const server = http.createServer();
   const quiz = attachQuizSockets(server, {
@@ -113,7 +115,7 @@ async function startServer(overrides = {}) {
     isTriviaAdmin: async (id) => id === HOST,
     loadProfile: async (id) => ({ name: NAMES[id], avatar: null }),
     isAllowedOrigin: () => true,
-    ...overrides,
+    ...socketOverrides,
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -167,6 +169,29 @@ test("only people signed up to the event can join as players", async () => {
     assert.equal(missing.code, "not_found");
     const malformed = await alice.emit("quiz:join", { sessionId: "nope" });
     assert.equal(malformed.code, "not_found");
+  } finally {
+    await harness.stop();
+  }
+});
+
+test("only listed Discord accounts can join a quiz without a Raid Helper event", async () => {
+  const harness = await startServer({
+    raidHelperEventId: null,
+    allowedDiscordIds: [ALICE],
+    signups: { isSignedUp: async () => { throw new Error("Raid Helper is down"); } },
+  });
+  try {
+    const outsider = harness.client(OUTSIDER);
+    await outsider.opened();
+    const denied = await outsider.emit("quiz:join", { sessionId: SESSION_ID });
+    assert.equal(denied.ok, false);
+    assert.equal(denied.code, "not_invited");
+
+    const alice = harness.client(ALICE);
+    await alice.opened();
+    const joined = await alice.emit("quiz:join", { sessionId: SESSION_ID });
+    assert.equal(joined.ok, true);
+    assert.equal(joined.role, "player");
   } finally {
     await harness.stop();
   }

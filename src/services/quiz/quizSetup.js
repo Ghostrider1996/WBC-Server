@@ -111,4 +111,57 @@ function normalizeTitle(raw, fallback) {
   return chosen.slice(0, TITLE_MAX);
 }
 
-module.exports = { QuizSetupError, TYPE_LABELS, normalizePool, normalizeSettings, normalizeTitle, typeLabel };
+const DISCORD_ID = /^\d{17,20}$/;
+const MAX_ALLOWED_DISCORD_IDS = 100;
+
+/** The accounts allowed to join when a quiz is not tied to a Raid Helper event. */
+function normalizeAllowedDiscordIds(raw) {
+  const parts = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/[\s,;]+/)
+      : [];
+  const ids = [];
+  const seen = new Set();
+  let invalid = false;
+
+  for (const part of parts) {
+    const id = String(part || "").trim();
+    if (!id) continue;
+    if (!DISCORD_ID.test(id)) {
+      invalid = true;
+      continue;
+    }
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+
+  if (invalid) {
+    throw new QuizSetupError("Each Discord ID must be the numeric ID, 17 to 20 digits.", {
+      allowedDiscordIds: "Each Discord ID must be the numeric ID, 17 to 20 digits.",
+    });
+  }
+  if (ids.length === 0) {
+    throw new QuizSetupError("Add at least one Discord ID that can join.", {
+      allowedDiscordIds: "Add at least one Discord ID that can join.",
+    });
+  }
+  if (ids.length > MAX_ALLOWED_DISCORD_IDS) {
+    throw new QuizSetupError(`List at most ${MAX_ALLOWED_DISCORD_IDS} Discord IDs.`, {
+      allowedDiscordIds: `List at most ${MAX_ALLOWED_DISCORD_IDS} Discord IDs.`,
+    });
+  }
+  return ids;
+}
+
+module.exports = {
+  QuizSetupError,
+  TYPE_LABELS,
+  normalizePool,
+  normalizeSettings,
+  normalizeTitle,
+  normalizeAllowedDiscordIds,
+  typeLabel,
+};

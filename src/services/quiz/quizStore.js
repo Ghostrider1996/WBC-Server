@@ -23,6 +23,7 @@ function presentSession(row) {
     id: row.id,
     title: row.title,
     raidHelperEventId: row.raid_helper_event_id,
+    allowedDiscordIds: Array.isArray(row.allowed_discord_ids) ? row.allowed_discord_ids.map(String) : [],
     hostDiscordId: row.host_discord_id,
     hostName: row.host_name || null,
     status: row.status,
@@ -66,13 +67,20 @@ async function readyCategoryCounts() {
   return result.rows;
 }
 
-async function createSession({ title, raidHelperEventId, hostDiscordId, rounds, settings }) {
+async function createSession({ title, raidHelperEventId, allowedDiscordIds, hostDiscordId, rounds, settings }) {
   try {
     const result = await query(
-      `INSERT INTO quiz_sessions (title, raid_helper_event_id, host_discord_id, rounds, settings)
-       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+      `INSERT INTO quiz_sessions (title, raid_helper_event_id, host_discord_id, rounds, settings, allowed_discord_ids)
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb)
        RETURNING id`,
-      [title, String(raidHelperEventId), hostDiscordId, JSON.stringify(rounds), JSON.stringify(settings)],
+      [
+        title,
+        raidHelperEventId ? String(raidHelperEventId) : null,
+        hostDiscordId,
+        JSON.stringify(rounds),
+        JSON.stringify(settings),
+        allowedDiscordIds ? JSON.stringify(allowedDiscordIds) : null,
+      ],
     );
     return getSession(result.rows[0].id);
   } catch (error) {

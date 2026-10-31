@@ -393,6 +393,14 @@ function compactPayload(payload) {
   );
 }
 
+function listedEvents(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.postedEvents)) return data.postedEvents;
+  if (Array.isArray(data?.events)) return data.events;
+  if (Array.isArray(data?.scheduledEvents)) return data.scheduledEvents;
+  return null;
+}
+
 async function getServerEvents() {
   const { serverId, apiKey } = getRaidHelperConfig();
 
@@ -403,9 +411,15 @@ async function getServerEvents() {
     headers: {
       Authorization: apiKey,
     },
+    timeout: 25000,
   });
 
-  const events = response.data.postedEvents ?? [];
+  const events = listedEvents(response.data);
+  if (!events) {
+    const error = new Error("Raid Helper events could not be loaded.");
+    error.statusCode = 502;
+    throw error;
+  }
   const detailedEvents = await Promise.all(
     events.map(async (event) => {
       try {

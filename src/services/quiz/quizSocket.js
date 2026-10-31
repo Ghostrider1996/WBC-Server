@@ -151,10 +151,11 @@ function attachQuizSockets(httpServer, deps = {}) {
         const asPlayer = payload?.mode === "player";
         const asHost = canHost && !asPlayer;
 
-        if (!canHost) {
+        const eventId = String(game.meta.raidHelperEventId || "").trim();
+        if (!canHost && eventId) {
           let signedUp;
           try {
-            signedUp = await signups.isSignedUp(game.meta.raidHelperEventId, discordId);
+            signedUp = await signups.isSignedUp(eventId, discordId);
           } catch (error) {
             console.error("Quiz sign-up check failed:", error?.message);
             return reply({ ok: false, code: "check_failed", reason: "Could not check your event sign-up right now. Try again in a moment." });
@@ -162,6 +163,13 @@ function attachQuizSockets(httpServer, deps = {}) {
           if (!signedUp) {
             return reply({ ok: false, code: "not_signed_up", reason: "Sign up for this event on the Raids page to join the quiz." });
           }
+        }
+        if (!canHost && !eventId && !game.meta.allowedDiscordIds?.has(String(discordId))) {
+          return reply({
+            ok: false,
+            code: "not_invited",
+            reason: "Only the Discord accounts listed by the host can join this quiz.",
+          });
         }
 
         if (asScreen && !canHost) {

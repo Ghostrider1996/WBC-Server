@@ -58,6 +58,7 @@ class QuizManager {
     const game = this.createGame({ id: session.id, title: session.title, settings: session.settings });
     game.meta = {
       raidHelperEventId: session.raidHelperEventId,
+      allowedDiscordIds: new Set(session.allowedDiscordIds || []),
       hostDiscordId: session.hostDiscordId,
       rounds: session.rounds,
     };

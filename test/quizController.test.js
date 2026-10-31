@@ -141,6 +141,53 @@ test("creating a quiz needs a real event and a valid question pool", async () =>
   }
 });
 
+test("a host can open a quiz without a Raid Helper event", async () => {
+  let lookedUp = 0;
+  const harness = await createHarness({
+    getEvent: async () => {
+      lookedUp += 1;
+      const error = new Error("The raid event could not be loaded.");
+      error.statusCode = 502;
+      throw error;
+    },
+  });
+  try {
+    const missing = await call(harness, "POST", "/quiz/sessions", {
+      as: HOST,
+      body: { skipRaidHelperEvent: true, title: "Open night", types: [{ type: "single_choice", count: 1 }] },
+    });
+    assert.equal(missing.status, 400);
+    assert.equal(missing.body.fields.allowedDiscordIds, "Add at least one Discord ID that can join.");
+
+    const invalid = await call(harness, "POST", "/quiz/sessions", {
+      as: HOST,
+      body: {
+        skipRaidHelperEvent: true,
+        allowedDiscordIds: ["not-an-id"],
+        types: [{ type: "single_choice", count: 1 }],
+      },
+    });
+    assert.equal(invalid.status, 400);
+
+    const created = await call(harness, "POST", "/quiz/sessions", {
+      as: HOST,
+      body: {
+        skipRaidHelperEvent: true,
+        title: "Open night",
+        allowedDiscordIds: ["200000000000000001", "200000000000000001"],
+        types: [{ type: "single_choice", count: 1 }],
+      },
+    });
+    assert.equal(created.status, 201);
+    assert.equal(lookedUp, 0);
+    assert.equal(harness.calls[0][1].raidHelperEventId, null);
+    assert.deepEqual(harness.calls[0][1].allowedDiscordIds, ["200000000000000001"]);
+    assert.equal(harness.calls[0][1].title, "Open night");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("a down Raid Helper lookup fails closed when creating a quiz", async () => {
   const error = new Error("The raid event could not be loaded.");
   error.statusCode = 502;

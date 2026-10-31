@@ -5,7 +5,7 @@ const triviaService = require("../services/triviaService");
 const raidHelperService = require("../services/raidHelperService");
 const quizStore = require("../services/quiz/quizStore");
 const { getSharedManager } = require("../services/quiz/quizManager");
-const { normalizePool, normalizeSettings, normalizeTitle } = require("../services/quiz/quizSetup");
+const { normalizePool, normalizeSettings, normalizeTitle, normalizeAllowedDiscordIds } = require("../services/quiz/quizSetup");
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const GENERIC_FAILURE = "The quiz could not be updated.";
@@ -100,21 +100,26 @@ function createQuizRouter(deps = {}) {
 
   router.post("/quiz/sessions", requireHost, handle(async (req) => {
     const body = req.body || {};
-    const eventId = typeof body.raidHelperEventId === "string" ? body.raidHelperEventId.trim() : "";
-    if (!eventId) {
+    const skipEvent = body.skipRaidHelperEvent === true;
+    const eventId = skipEvent
+      ? ""
+      : (typeof body.raidHelperEventId === "string" ? body.raidHelperEventId.trim() : "");
+    if (!eventId && !skipEvent) {
       const error = new Error("Choose the event this quiz is for.");
       error.statusCode = 400;
       error.fields = { raidHelperEventId: "Choose the event this quiz is for." };
       throw error;
     }
 
-    const event = await getEvent(eventId);
+    const event = eventId ? await getEvent(eventId) : null;
+    const allowedDiscordIds = skipEvent ? normalizeAllowedDiscordIds(body.allowedDiscordIds) : null;
     const types = await store.readyTypeCounts();
     const available = new Map(types.map((item) => [item.type, item.count]));
 
     const session = await store.createSession({
       title: normalizeTitle(body.title, event?.title ?? event?.name),
-      raidHelperEventId: eventId,
+      raidHelperEventId: eventId || null,
+      allowedDiscordIds,
       hostDiscordId: req.quizSession.discordId,
       rounds: normalizePool(body, available),
       settings: normalizeSettings(body.settings),
