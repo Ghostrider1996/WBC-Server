@@ -1,4 +1,5 @@
 const { getPool, query } = require("../db/pool");
+const { OWNER_DISCORD_ID } = require("./adminService");
 
 const DISCORD_SNOWFLAKE = /^\d{17,20}$/;
 
@@ -146,8 +147,32 @@ async function setApplicantMains(rows) {
   return listApplicants();
 }
 
+async function deleteApplicant(discordId, actorDiscordId) {
+  const id = cleanDiscordId(discordId);
+  if (!id) throw fail("That Discord account is not saved.", 400);
+  if (id === OWNER_DISCORD_ID) throw fail("The guild owner cannot be deleted.", 400);
+  if (id === cleanDiscordId(actorDiscordId)) throw fail("You cannot delete your own account.", 400);
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const applicant = await client.query("DELETE FROM guild_applicants WHERE discord_id = $1", [id]);
+    await client.query("DELETE FROM trivia_admins WHERE discord_id = $1", [id]);
+    await client.query("DELETE FROM guild_admins WHERE discord_id = $1 AND role <> 'owner'", [id]);
+    const user = await client.query("DELETE FROM users WHERE discord_id = $1", [id]);
+    if (applicant.rowCount + user.rowCount < 1) throw fail("That Discord account is not saved.", 404);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   cleanMainCharacterName,
+  deleteApplicant,
   listApplicants,
   rememberApplicant,
   setApplicantMains,

@@ -1,5 +1,6 @@
 const { Router } = require("express");
-const { authorizeBridge, ingestBridgeUpload, listGuildRoster } = require("../services/bridgeService");
+const { isAdmin } = require("../services/adminService");
+const { authorizeBridge, ingestBridgeUpload, listGuildRoster, updateGuildMessage } = require("../services/bridgeService");
 
 const bridgeRouter = Router();
 
@@ -31,6 +32,27 @@ bridgeRouter.get("/roster", async (_req, res) => {
     return res.status(200).json(roster);
   } catch (error) {
     return handleBridgeError(res, error, "Guild roster could not be loaded.");
+  }
+});
+
+bridgeRouter.patch("/roster/message", async (req, res) => {
+  try {
+    const allowed = await isAdmin({
+      username: req.body?.username,
+      globalName: req.body?.globalName,
+      discordId: req.body?.discordId,
+    });
+    if (!allowed) {
+      return res.status(403).json({ reason: "Only a guild admin can update the message of the day.", status: "failed" });
+    }
+    if (typeof req.body?.messageOfTheDay !== "string") {
+      return res.status(400).json({ reason: "A message is required.", status: "failed" });
+    }
+
+    const messageOfTheDay = await updateGuildMessage(req.body.messageOfTheDay);
+    return res.status(200).json({ messageOfTheDay });
+  } catch (error) {
+    return handleBridgeError(res, error, "The guild message could not be saved.");
   }
 });
 

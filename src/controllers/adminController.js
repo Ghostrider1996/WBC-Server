@@ -5,7 +5,7 @@ const {
   isAdmin,
   listGuildAdmins,
 } = require("../services/adminService");
-const { listApplicants, setApplicantMains } = require("../services/applicantService");
+const { deleteApplicant, listApplicants, setApplicantMains } = require("../services/applicantService");
 
 const adminRouter = Router();
 
@@ -68,6 +68,20 @@ adminRouter.post("/applicants/mains", async (req, res) => {
     return res.status(200).json({ applicants: await setApplicantMains(req.body?.applicants) });
   } catch (error) {
     return handleAdminError(res, error, "The main characters could not be saved.");
+  }
+});
+
+adminRouter.delete("/applicants/:discordId", async (req, res) => {
+  try {
+    const actor = actorFromRequest(req);
+    if (!(await isAdmin(actor))) {
+      return res.status(403).json({ reason: "Only a guild admin can delete accounts.", status: "failed" });
+    }
+
+    await deleteApplicant(req.params.discordId, actor.discordId);
+    return res.status(204).end();
+  } catch (error) {
+    return handleAdminError(res, error, "The account could not be deleted.");
   }
 });
 

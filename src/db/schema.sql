@@ -345,6 +345,8 @@ CREATE TRIGGER guild_profession_recipes_set_updated_at
   BEFORE UPDATE ON guild_profession_recipes
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+ALTER TABLE guild_roster_meta ADD COLUMN IF NOT EXISTS message_of_the_day TEXT;
+
 ALTER TABLE guild_roster_members ADD COLUMN IF NOT EXISTS last_online_text TEXT;
 ALTER TABLE guild_roster_members ADD COLUMN IF NOT EXISTS last_online_hours INTEGER;
 ALTER TABLE guild_roster_members ADD COLUMN IF NOT EXISTS main_character_name TEXT;

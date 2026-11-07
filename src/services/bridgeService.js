@@ -802,6 +802,18 @@ async function ingestBridgeUpload(payload = {}) {
       );
     }
 
+    if (typeof payload.messageOfTheDay === "string") {
+      const messageOfTheDay = payload.messageOfTheDay.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim().slice(0, 500);
+      await client.query(
+        `INSERT INTO guild_roster_meta (id, message_of_the_day, updated_at)
+         VALUES (1, $1, now())
+         ON CONFLICT (id) DO UPDATE SET
+           message_of_the_day = EXCLUDED.message_of_the_day,
+           updated_at = now()`,
+        [messageOfTheDay],
+      );
+    }
+
     if (roster.length > 0) {
       await upsertRosterMembers(client, roster);
       await deleteCharactersNotIn(client, roster.map((member) => asTrimmedString(member.name)));
@@ -1065,10 +1077,28 @@ async function listRosterForDiscord(discordId) {
     });
 }
 
+async function updateGuildMessage(message) {
+  const messageOfTheDay = String(message || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim().slice(0, 500);
+  await getPool().query(
+    `INSERT INTO guild_roster_meta (id, message_of_the_day, updated_at)
+     VALUES (1, $1, now())
+     ON CONFLICT (id) DO UPDATE SET
+       message_of_the_day = EXCLUDED.message_of_the_day,
+       updated_at = now()`,
+    [messageOfTheDay || null],
+  );
+  return messageOfTheDay;
+}
+
 async function listGuildRoster() {
   const pool = getPool();
   const [meta, members, professions, recipes, discordByMain] = await Promise.all([
-    pool.query("SELECT roster_updated_at AS \"rosterUpdatedAt\" FROM guild_roster_meta WHERE id = 1"),
+    pool.query(`
+      SELECT roster_updated_at AS "rosterUpdatedAt",
+             message_of_the_day AS "messageOfTheDay"
+      FROM guild_roster_meta
+      WHERE id = 1
+    `),
     pool.query(`
       SELECT character_name, rank_index, rank_name, level, class, public_note, online,
              last_online_days, last_online_hours, last_online_text, main_character_name
@@ -1099,6 +1129,7 @@ async function listGuildRoster() {
 
   return {
     rosterUpdatedAt: meta.rows[0]?.rosterUpdatedAt || null,
+    messageOfTheDay: typeof meta.rows[0]?.messageOfTheDay === "string" ? meta.rows[0].messageOfTheDay : "",
     members: members.rows.map((row) => presentMember(row, discordNameForMember(row, discordByMain))),
     professions: visibleProfessions.map((row) => (
       presentProfession(row, recipesForProfessionRow(row, recipesByKey, canonicalByCharacter))
@@ -1111,4 +1142,5 @@ module.exports = {
   ingestBridgeUpload,
   listGuildRoster,
   listRosterForDiscord,
+  updateGuildMessage,
 };
