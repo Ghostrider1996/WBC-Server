@@ -614,8 +614,27 @@ async function upsertRosterMembers(client, members) {
   }
 }
 
-function isAltPlayerRank(rankName) {
-  return asTrimmedString(rankName).toLowerCase() === "alt player";
+function isAltRank(rankName) {
+  const key = rankKey(rankName);
+  return key === "altplayer" || key === "leadershipalt" || key === "altleadership";
+}
+
+function linkedMainName(row, byName) {
+  if (!isAltRank(row.rank_name)) return "";
+  const noted = byName.get(characterKey(row.officer_note));
+  if (
+    noted
+    && characterKey(noted.character_name) !== characterKey(row.character_name)
+    && !isAltRank(noted.rank_name)
+  ) {
+    return noted.character_name;
+  }
+  return "";
+}
+
+function withResolvedMain(row, byName) {
+  if (!isAltRank(row.rank_name)) return row;
+  return { ...row, main_character_name: linkedMainName(row, byName) || null };
 }
 
 function characterKey(name) {
@@ -631,17 +650,7 @@ async function linkMainsAndAlts(client) {
   for (const row of result.rows) byName.set(characterKey(row.character_name), row);
 
   for (const row of result.rows) {
-    let mainName = null;
-    if (isAltPlayerRank(row.rank_name)) {
-      const noted = byName.get(characterKey(row.officer_note));
-      if (
-        noted
-        && characterKey(noted.character_name) !== characterKey(row.character_name)
-        && !isAltPlayerRank(noted.rank_name)
-      ) {
-        mainName = noted.character_name;
-      }
-    }
+    const mainName = linkedMainName(row, byName) || null;
 
     await client.query(
       `UPDATE guild_roster_members
@@ -1055,21 +1064,28 @@ async function listRosterForDiscord(discordId) {
 
   const [members, discordByMain] = await Promise.all([
     pool.query(
-    `SELECT character_name, rank_index, rank_name, level, class, public_note, online,
+    `SELECT character_name, rank_index, rank_name, level, class, public_note, officer_note, online,
             last_online_days, last_online_hours, last_online_text, main_character_name
      FROM guild_roster_members
      WHERE lower(character_name) = lower($1)
         OR lower(btrim(main_character_name)) = lower($1)
+        OR lower(btrim(officer_note)) = lower($1)
      ORDER BY lower(character_name) ASC`,
       [mainName],
     ),
     discordNamesByMain(pool),
   ]);
 
+  const rosterByName = new Map(members.rows.map((row) => [characterKey(row.character_name), row]));
   return members.rows
+    .map((row) => withResolvedMain(row, rosterByName))
+    .filter((row) => (
+      characterKey(row.character_name) === characterKey(mainName)
+      || characterKey(row.main_character_name) === characterKey(mainName)
+    ))
     .map((row) => ({
       ...presentMember(row, discordNameForMember(row, discordByMain)),
-      isMain: String(row.character_name || "").trim().toLowerCase() === mainName.toLowerCase(),
+      isMain: characterKey(row.character_name) === characterKey(mainName),
     }))
     .sort((left, right) => {
       if (left.isMain !== right.isMain) return left.isMain ? -1 : 1;
@@ -1100,13 +1116,9 @@ async function listGuildRoster() {
       WHERE id = 1
     `),
     pool.query(`
-      SELECT character_name, rank_index, rank_name, level, class, public_note, online,
+      SELECT character_name, rank_index, rank_name, level, class, public_note, officer_note, online,
              last_online_days, last_online_hours, last_online_text, main_character_name
       FROM guild_roster_members
-      WHERE NOT (
-        lower(rank_name) = 'alt player'
-        AND COALESCE(btrim(main_character_name), '') = ''
-      )
       ORDER BY rank_index ASC NULLS LAST, lower(character_name) ASC
     `),
     pool.query(`
@@ -1122,7 +1134,11 @@ async function listGuildRoster() {
     discordNamesByMain(pool),
   ]);
 
-  const visibleNames = new Set(members.rows.map((row) => String(row.character_name || "").toLowerCase()));
+  const rosterByName = new Map(members.rows.map((row) => [characterKey(row.character_name), row]));
+  const visibleMembers = members.rows
+    .map((row) => withResolvedMain(row, rosterByName))
+    .filter((row) => !isAltRank(row.rank_name) || asTrimmedString(row.main_character_name));
+  const visibleNames = new Set(visibleMembers.map((row) => characterKey(row.character_name)));
   const visibleProfessions = professions.rows.filter((row) => visibleNames.has(String(row.character_name || "").toLowerCase()));
   const recipesByKey = recipesByProfessionKey(recipes.rows);
   const canonicalByCharacter = canonicalRecipeIdsByCharacter(visibleProfessions, recipesByKey);
@@ -1130,7 +1146,7 @@ async function listGuildRoster() {
   return {
     rosterUpdatedAt: meta.rows[0]?.rosterUpdatedAt || null,
     messageOfTheDay: typeof meta.rows[0]?.messageOfTheDay === "string" ? meta.rows[0].messageOfTheDay : "",
-    members: members.rows.map((row) => presentMember(row, discordNameForMember(row, discordByMain))),
+    members: visibleMembers.map((row) => presentMember(row, discordNameForMember(row, discordByMain))),
     professions: visibleProfessions.map((row) => (
       presentProfession(row, recipesForProfessionRow(row, recipesByKey, canonicalByCharacter))
     )),
