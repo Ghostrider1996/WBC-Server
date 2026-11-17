@@ -570,19 +570,58 @@ async function withTransaction(fn) {
   }
 }
 
+const WRITE_BATCH_SIZE = 400;
+
+function lastRowsByKey(rows, keyFor) {
+  const byKey = new Map();
+  for (const row of rows) byKey.set(keyFor(row), row);
+  return [...byKey.values()];
+}
+
+async function insertRows(client, rows, casts, statement) {
+  for (let start = 0; start < rows.length; start += WRITE_BATCH_SIZE) {
+    const batch = rows.slice(start, start + WRITE_BATCH_SIZE);
+    const values = [];
+    const groups = batch.map((row) => `(${row.map((value, index) => {
+      values.push(value);
+      return `$${values.length}${casts[index] || ""}`;
+    }).join(", ")})`);
+    await client.query(statement(groups.join(", ")), values);
+  }
+}
+
 async function upsertRosterMembers(client, members) {
+  const rows = [];
   for (const member of members) {
     const characterName = asTrimmedString(member?.name);
     if (!characterName) continue;
 
     const rankName = asTrimmedString(member.rankName || member.rank) || null;
     const lastOnline = parseLastOnline(member);
+    rows.push([
+      characterName,
+      asInteger(member.rankIndex) ?? rankIndexFromName(rankName),
+      rankName,
+      asInteger(member.level),
+      asTrimmedString(member.class || member.classFile || member.className) || null,
+      asTrimmedString(member.publicNote || member.note),
+      asTrimmedString(member.officerNote),
+      lastOnline.online,
+      lastOnline.lastOnlineDays,
+      lastOnline.lastOnlineHours,
+      resolveLastOnlineAt(member),
+      lastOnline.lastOnlineText,
+    ]);
+  }
 
-    await client.query(
-      `INSERT INTO guild_roster_members (
+  await insertRows(
+    client,
+    lastRowsByKey(rows, (row) => row[0].toLowerCase()),
+    [],
+    (valuesSql) => `INSERT INTO guild_roster_members (
         character_name, rank_index, rank_name, level, class, public_note, officer_note,
         online, last_online_days, last_online_hours, last_online_at, last_online_text
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      ) VALUES ${valuesSql}
       ON CONFLICT (lower(character_name)) DO UPDATE SET
         character_name = EXCLUDED.character_name,
         rank_index = COALESCE(EXCLUDED.rank_index, guild_roster_members.rank_index),
@@ -596,22 +635,7 @@ async function upsertRosterMembers(client, members) {
         last_online_hours = COALESCE(EXCLUDED.last_online_hours, guild_roster_members.last_online_hours),
         last_online_at = COALESCE(EXCLUDED.last_online_at, guild_roster_members.last_online_at),
         last_online_text = COALESCE(EXCLUDED.last_online_text, guild_roster_members.last_online_text)`,
-      [
-        characterName,
-        asInteger(member.rankIndex) ?? rankIndexFromName(rankName),
-        rankName,
-        asInteger(member.level),
-        asTrimmedString(member.class || member.classFile || member.className) || null,
-        asTrimmedString(member.publicNote || member.note),
-        asTrimmedString(member.officerNote),
-        lastOnline.online,
-        lastOnline.lastOnlineDays,
-        lastOnline.lastOnlineHours,
-        resolveLastOnlineAt(member),
-        lastOnline.lastOnlineText,
-      ],
-    );
-  }
+  );
 }
 
 function isAltRank(rankName) {
@@ -649,16 +673,18 @@ async function linkMainsAndAlts(client) {
   const byName = new Map();
   for (const row of result.rows) byName.set(characterKey(row.character_name), row);
 
-  for (const row of result.rows) {
-    const mainName = linkedMainName(row, byName) || null;
+  if (result.rows.length === 0) return;
 
-    await client.query(
-      `UPDATE guild_roster_members
-       SET main_character_name = $2
-       WHERE lower(character_name) = lower($1)`,
-      [row.character_name, mainName],
-    );
-  }
+  await client.query(
+    `UPDATE guild_roster_members AS members
+     SET main_character_name = incoming.main_name
+     FROM unnest($1::text[], $2::text[]) AS incoming(character_name, main_name)
+     WHERE lower(members.character_name) = lower(incoming.character_name)`,
+    [
+      result.rows.map((row) => row.character_name),
+      result.rows.map((row) => linkedMainName(row, byName) || null),
+    ],
+  );
 }
 
 async function deleteCharactersNotIn(client, names) {
@@ -688,71 +714,91 @@ async function replaceProfessionTables(client) {
 }
 
 async function upsertProfessions(client, professions) {
+  const professionRows = [];
+  const gatheringRows = [];
+  const recipeRows = [];
+
   for (const profession of professions) {
     const characterName = asTrimmedString(profession?.characterName);
     const skillLineId = skillLineIdFromProfession(profession);
     const name = asTrimmedString(profession?.name);
     if (!characterName || skillLineId == null || !name) continue;
 
-    await client.query(
-      `INSERT INTO guild_professions (
+    professionRows.push([
+      characterName,
+      name,
+      skillLineId,
+      asInteger(profession.currentSkill),
+      asInteger(profession.maxSkill),
+      asTrimmedString(profession.discordName) || null,
+    ]);
+
+    if (profession.gathering || isGatheringRosterProfession(name)) {
+      gatheringRows.push([characterName, skillLineId]);
+      continue;
+    }
+
+    if (!Array.isArray(profession.recipes)) continue;
+    for (const recipe of profession.recipes) {
+      const recipeId = asInteger(recipe?.recipeID ?? recipe?.recipeId);
+      if (recipeId == null) continue;
+      recipeRows.push([
+        asTrimmedString(recipe.characterName) || characterName,
+        skillLineId,
+        recipeId,
+        asTrimmedString(recipe.recipeName) || null,
+        recipe.learned === false ? false : true,
+        asInteger(recipe.outputItemID ?? recipe.outputItemId),
+        asTrimmedString(recipe.icon) || null,
+        recipe.materials ? JSON.stringify(recipe.materials) : null,
+      ]);
+    }
+  }
+
+  await insertRows(
+    client,
+    lastRowsByKey(professionRows, (row) => `${row[0].toLowerCase()}:${row[2]}`),
+    [],
+    (valuesSql) => `INSERT INTO guild_professions (
         character_name, name, skill_line_id, current_skill, max_skill, discord_name
-      ) VALUES ($1, $2, $3, $4, $5, $6)
+      ) VALUES ${valuesSql}
       ON CONFLICT (lower(character_name), skill_line_id) DO UPDATE SET
         character_name = EXCLUDED.character_name,
         name = EXCLUDED.name,
         current_skill = EXCLUDED.current_skill,
         max_skill = EXCLUDED.max_skill,
         discord_name = COALESCE(NULLIF(EXCLUDED.discord_name, ''), guild_professions.discord_name)`,
+  );
+
+  const gathering = lastRowsByKey(gatheringRows, (row) => `${row[0].toLowerCase()}:${row[1]}`);
+  if (gathering.length > 0) {
+    await client.query(
+      `DELETE FROM guild_profession_recipes AS recipes
+       USING unnest($1::text[], $2::int[]) AS gathering(character_name, skill_line_id)
+       WHERE lower(recipes.character_name) = lower(gathering.character_name)
+         AND recipes.skill_line_id = gathering.skill_line_id`,
       [
-        characterName,
-        name,
-        skillLineId,
-        asInteger(profession.currentSkill),
-        asInteger(profession.maxSkill),
-        asTrimmedString(profession.discordName) || null,
+        gathering.map((row) => row[0]),
+        gathering.map((row) => row[1]),
       ],
     );
-
-    if (profession.gathering || isGatheringRosterProfession(name)) {
-      await client.query(
-        `DELETE FROM guild_profession_recipes
-         WHERE lower(character_name) = lower($1) AND skill_line_id = $2`,
-        [characterName, skillLineId],
-      );
-      continue;
-    }
-
-    if (!Array.isArray(profession.recipes) || profession.recipes.length === 0) continue;
-
-    for (const recipe of profession.recipes) {
-      const recipeId = asInteger(recipe?.recipeID ?? recipe?.recipeId);
-      if (recipeId == null) continue;
-
-      await client.query(
-        `INSERT INTO guild_profession_recipes (
-          character_name, skill_line_id, recipe_id, recipe_name, learned, output_item_id, icon, materials
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-        ON CONFLICT (lower(character_name), skill_line_id, recipe_id) DO UPDATE SET
-          character_name = EXCLUDED.character_name,
-          recipe_name = EXCLUDED.recipe_name,
-          learned = EXCLUDED.learned,
-          output_item_id = EXCLUDED.output_item_id,
-          icon = EXCLUDED.icon,
-          materials = COALESCE(EXCLUDED.materials, guild_profession_recipes.materials)`,
-        [
-          asTrimmedString(recipe.characterName) || characterName,
-          skillLineId,
-          recipeId,
-          asTrimmedString(recipe.recipeName) || null,
-          recipe.learned === false ? false : true,
-          asInteger(recipe.outputItemID ?? recipe.outputItemId),
-          asTrimmedString(recipe.icon) || null,
-          recipe.materials ? JSON.stringify(recipe.materials) : null,
-        ],
-      );
-    }
   }
+
+  await insertRows(
+    client,
+    lastRowsByKey(recipeRows, (row) => `${row[0].toLowerCase()}:${row[1]}:${row[2]}`),
+    ["", "", "", "", "", "", "", "::jsonb"],
+    (valuesSql) => `INSERT INTO guild_profession_recipes (
+        character_name, skill_line_id, recipe_id, recipe_name, learned, output_item_id, icon, materials
+      ) VALUES ${valuesSql}
+      ON CONFLICT (lower(character_name), skill_line_id, recipe_id) DO UPDATE SET
+        character_name = EXCLUDED.character_name,
+        recipe_name = EXCLUDED.recipe_name,
+        learned = EXCLUDED.learned,
+        output_item_id = EXCLUDED.output_item_id,
+        icon = EXCLUDED.icon,
+        materials = COALESCE(EXCLUDED.materials, guild_profession_recipes.materials)`,
+  );
 }
 
 async function dropProfessions(client, drops) {
@@ -959,27 +1005,24 @@ function recipesForProfessionRow(row, recipesByKey, canonicalByCharacter) {
 
 async function dropCopiedProfessionRecipes(client, professionRows, recipesByKey) {
   const canonicalByCharacter = canonicalRecipeIdsByCharacter(professionRows, recipesByKey);
+  if (professionRows.length === 0) return;
 
-  for (const row of professionRows) {
-    const kept = recipesForProfessionRow(row, recipesByKey, canonicalByCharacter);
-    const keptIds = kept.map((recipe) => recipe.recipe_id);
-    if (keptIds.length === 0) {
-      await client.query(
-        `DELETE FROM guild_profession_recipes
-         WHERE lower(character_name) = lower($1) AND skill_line_id = $2`,
-        [row.character_name, row.skill_line_id],
-      );
-      continue;
-    }
-
-    await client.query(
-      `DELETE FROM guild_profession_recipes
-       WHERE lower(character_name) = lower($1)
-         AND skill_line_id = $2
-         AND NOT (recipe_id = ANY($3::int[]))`,
-      [row.character_name, row.skill_line_id, keptIds],
-    );
-  }
+  await client.query(
+    `DELETE FROM guild_profession_recipes AS recipes
+     USING unnest($1::text[], $2::int[], $3::text[]) AS target(character_name, skill_line_id, kept_ids)
+     WHERE lower(recipes.character_name) = lower(target.character_name)
+       AND recipes.skill_line_id = target.skill_line_id
+       AND NOT (recipes.recipe_id IN (
+         SELECT value::int FROM jsonb_array_elements_text(target.kept_ids::jsonb) AS value
+       ))`,
+    [
+      professionRows.map((row) => row.character_name),
+      professionRows.map((row) => row.skill_line_id),
+      professionRows.map((row) => JSON.stringify(
+        recipesForProfessionRow(row, recipesByKey, canonicalByCharacter).map((recipe) => recipe.recipe_id),
+      )),
+    ],
+  );
 }
 
 async function discordNamesByMain(pool) {
