@@ -150,7 +150,7 @@ const RANK_INDEX_BY_NAME = {
   vanguard: 2,
   pathfinder: 3,
   member: 4,
-  altleadership: 5,
+  leadership: 5,
   altplayer: 6,
   newcomer: 7,
 };
@@ -640,7 +640,7 @@ async function upsertRosterMembers(client, members) {
 
 function isAltRank(rankName) {
   const key = rankKey(rankName);
-  return key === "altplayer" || key === "leadershipalt" || key === "altleadership";
+  return key === "altplayer" || key === "leadership";
 }
 
 function linkedMainName(row, byName) {

@@ -16,17 +16,25 @@ raidAssignmentsRouter.post("/raid-assignments/discord", async (req, res) => {
   const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
   const sections = req.body?.sections;
   const eventId = typeof req.body?.eventId === "string" ? req.body.eventId.trim() : "";
+  const channelId = typeof req.body?.channelId === "string" ? req.body.channelId.trim() : "";
+  const roleId = typeof req.body?.roleId === "string" ? req.body.roleId.trim() : "";
 
   if (!title || !Array.isArray(sections) || sections.length === 0) {
     return res.status(400).json({ reason: "Assignment title and sections are required.", status: "failed" });
+  }
+
+  if (!channelId) {
+    return res.status(400).json({ reason: "Choose an assignment channel.", status: "failed" });
   }
 
   try {
     await pushRaidAssignments({
       title,
       sections,
-      includeImage: req.body?.includeImage !== false,
+      includeImage: req.body?.includeImage === true,
       eventId,
+      channelId,
+      roleId,
     });
     return res.status(201).json({ status: "pushed" });
   } catch (error) {

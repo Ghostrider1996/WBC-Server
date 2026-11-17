@@ -203,12 +203,155 @@ function cleanSectionValue(value) {
   return text.slice(0, 1024) || "None set";
 }
 
-async function pushRaidAssignments({ title, sections, includeImage, eventId }) {
-  const webhookUrl = process.env.DISCORD_ASSIGNMENTS_WEBHOOK_URL;
+const ASSIGNMENT_CHANNELS = {
+  "1512229796900241510": "Saturday events",
+  "1512233253178704104": "Sunday events",
+  "1572025563747459182": "F-Team assignments",
+  "1572025615274741850": "E-Team assignments",
+  "1554020208190955530": "C-Team assignments",
+  "1554020441339723856": "D-Team assignments",
+  "1566431068347699270": "B-Team assignments",
+  "1554020645812051988": "A-Team assignments",
+  "1547310122680721483": "K-Twenty assignments",
+  "1554074940599435365": "S-Twenty assignments",
+  "1572025766139531426": "W-Twenty assignments",
+};
+
+const CHANNEL_WEBHOOKS = {
+  "1512229796900241510": "DISCORD_ASSIGNMENTS_WEBHOOK_SATURDAY",
+  "1512233253178704104": "DISCORD_ASSIGNMENTS_WEBHOOK_SUNDAY",
+};
+
+function webhookForChannel(channelId) {
+  const envName = CHANNEL_WEBHOOKS[String(channelId || "").trim()];
+  return envName ? cleanEnvValue(process.env[envName]) : "";
+}
+
+let assignmentPushQueue = Promise.resolve();
+
+function enqueueAssignmentPush(task) {
+  const run = assignmentPushQueue.then(task, task);
+  assignmentPushQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function cleanEnvValue(value) {
+  if (!value || typeof value !== "string") return "";
+  return value.split("#")[0].trim();
+}
+
+function assignmentError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+async function webhookChannelId(webhookUrl) {
+  const response = await axios.get(webhookUrl);
+  return String(response.data?.channel_id || "");
+}
+
+function roleMentionId(roleId) {
+  const id = String(roleId || "").replace(/\D/g, "");
+  return /^\d{17,20}$/.test(id) ? id : "";
+}
+
+function mentionPayload(embed, roleId) {
+  const id = roleMentionId(roleId);
+  const payload = { embeds: [embed] };
+  if (!id) return payload;
+  payload.content = `<@&${id}>`;
+  payload.allowed_mentions = { parse: [], roles: [id] };
+  return payload;
+}
+
+async function postWithWebhook(webhookUrl, embed, roleId) {
+  await axios.post(webhookUrl, mentionPayload(embed, roleId));
+}
+
+async function moveWebhook(webhookUrl, channelId, botToken) {
+  const match = String(webhookUrl).match(/\/webhooks\/(\d+)\//);
+  if (!match) return false;
+  await axios.patch(
+    `https://discord.com/api/v10/webhooks/${match[1]}`,
+    { channel_id: channelId },
+    { headers: { Authorization: `Bot ${botToken}` } },
+  );
+  return await webhookChannelId(webhookUrl) === String(channelId);
+}
+
+async function postWithBot(channelId, embed, botToken, roleId) {
+  await axios.post(
+    `https://discord.com/api/v10/channels/${channelId}/messages`,
+    mentionPayload(embed, roleId),
+    { headers: { Authorization: `Bot ${botToken}` } },
+  );
+}
+
+async function deliverAssignment(webhookUrl, channelId, embed, roleId) {
+  const dedicated = webhookForChannel(channelId);
+  if (dedicated) {
+    try {
+      await postWithWebhook(dedicated, embed, roleId);
+      return;
+    } catch (error) {
+      throw assignmentError("The assignments webhook rejected the request.", error.response?.status || 502);
+    }
+  }
+
+  const botToken = cleanEnvValue(process.env.DISCORD_BOT_TOKEN);
+  let currentChannel = "";
+  try {
+    currentChannel = await webhookChannelId(webhookUrl);
+  } catch {
+    currentChannel = "";
+  }
+
+  if (currentChannel === String(channelId)) {
+    await postWithWebhook(webhookUrl, embed, roleId);
+    return;
+  }
+
+  if (!botToken) {
+    throw assignmentError(
+      "This webhook can only post in the channel it was created in. Add DISCORD_BOT_TOKEN on the server so assignments can go to the channel you pick.",
+      400,
+    );
+  }
+
+  try {
+    if (await moveWebhook(webhookUrl, channelId, botToken)) {
+      await postWithWebhook(webhookUrl, embed, roleId);
+      return;
+    }
+  } catch {
+    // The bot may not be allowed to move the webhook. Post into the channel directly.
+  }
+
+  try {
+    await postWithBot(channelId, embed, botToken, roleId);
+  } catch (error) {
+    const status = error.response?.status;
+    if (status === 403 || status === 404) {
+      throw assignmentError("The bot cannot post in that channel. It needs permission to send messages there.", status);
+    }
+    throw assignmentError("The assignment could not be posted in that channel.", status || 502);
+  }
+}
+
+async function pushRaidAssignments({ title, sections, includeImage, eventId, channelId, roleId }) {
+  const webhookUrl = webhookForChannel(channelId) || cleanEnvValue(process.env.DISCORD_ASSIGNMENTS_WEBHOOK_URL);
 
   if (!webhookUrl) {
     const error = new Error("Discord assignments webhook is not configured");
     error.statusCode = 500;
+    throw error;
+  }
+
+  const selectedChannel = ASSIGNMENT_CHANNELS[String(channelId || "").trim()];
+  if (!selectedChannel) {
+    const error = new Error("Choose an assignment channel.");
+    error.statusCode = 400;
     throw error;
   }
 
@@ -232,20 +375,18 @@ async function pushRaidAssignments({ title, sections, includeImage, eventId }) {
     color: 9127188,
     fields,
     timestamp: new Date().toISOString(),
-    footer: { text: eventId ? `Event ${String(eventId).slice(0, 80)}` : "WBC Raid Assignments" },
+    footer: {
+      text: [selectedChannel, eventId ? `Event ${String(eventId).slice(0, 80)}` : "WBC Raid Assignments"]
+        .join(" · ")
+        .slice(0, 2048),
+    },
   };
 
-  if (includeImage !== false) {
+  if (includeImage === true) {
     embed.image = { url: MAGTHERIDON_DIAGRAM_URL };
   }
 
-  try {
-    await axios.post(webhookUrl, { embeds: [embed] });
-  } catch (error) {
-    const webhookError = new Error("Assignments webhook rejected the request");
-    webhookError.statusCode = error.response?.status || 502;
-    throw webhookError;
-  }
+  return enqueueAssignmentPush(() => deliverAssignment(webhookUrl, String(channelId).trim(), embed, roleId));
 }
 
 module.exports = { submitApplication, pushRaidAssignments };
