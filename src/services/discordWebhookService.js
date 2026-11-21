@@ -265,8 +265,18 @@ function mentionPayload(embed, roleId) {
   return payload;
 }
 
+function discordErrorDetail(error) {
+  const data = error?.response?.data;
+  if (!data || typeof data !== "object") return "";
+  const message = typeof data.message === "string" ? data.message.trim() : "";
+  if (!message || /https?:\/\//i.test(message)) return "";
+  const code = data.code ? ` (${data.code})` : "";
+  return `${message}${code}`.slice(0, 240);
+}
+
 async function postWithWebhook(webhookUrl, embed, roleId) {
-  await axios.post(webhookUrl, mentionPayload(embed, roleId));
+  const response = await axios.post(`${webhookUrl}?wait=true`, mentionPayload(embed, roleId));
+  return response.data?.id ? String(response.data.id) : "";
 }
 
 async function moveWebhook(webhookUrl, channelId, botToken) {
@@ -289,13 +299,26 @@ async function postWithBot(channelId, embed, botToken, roleId) {
 }
 
 async function deliverAssignment(webhookUrl, channelId, embed, roleId) {
-  const dedicated = webhookForChannel(channelId);
+  const channelKey = String(channelId || "").trim();
+  const dedicated = webhookForChannel(channelKey);
+  if (CHANNEL_WEBHOOKS[channelKey] && !dedicated) {
+    const label = ASSIGNMENT_CHANNELS[channelKey] || "That channel";
+    throw assignmentError(
+      `${label} is not configured on this server. Set ${CHANNEL_WEBHOOKS[channelKey]} and restart the server.`,
+      400,
+    );
+  }
   if (dedicated) {
     try {
-      await postWithWebhook(dedicated, embed, roleId);
-      return;
+      return await postWithWebhook(dedicated, embed, roleId);
     } catch (error) {
-      throw assignmentError("The assignments webhook rejected the request.", error.response?.status || 502);
+      const detail = discordErrorDetail(error);
+      throw assignmentError(
+        detail
+          ? `The assignments webhook rejected the request. ${detail}`
+          : "The assignments webhook rejected the request.",
+        error.response?.status || 502,
+      );
     }
   }
 
@@ -308,8 +331,7 @@ async function deliverAssignment(webhookUrl, channelId, embed, roleId) {
   }
 
   if (currentChannel === String(channelId)) {
-    await postWithWebhook(webhookUrl, embed, roleId);
-    return;
+    return await postWithWebhook(webhookUrl, embed, roleId);
   }
 
   if (!botToken) {
@@ -321,8 +343,7 @@ async function deliverAssignment(webhookUrl, channelId, embed, roleId) {
 
   try {
     if (await moveWebhook(webhookUrl, channelId, botToken)) {
-      await postWithWebhook(webhookUrl, embed, roleId);
-      return;
+      return await postWithWebhook(webhookUrl, embed, roleId);
     }
   } catch {
     // The bot may not be allowed to move the webhook. Post into the channel directly.
